@@ -54,4 +54,4 @@ async function sendWelcome(to) {
   // I'll give the full updated file if needed
 }
 
-app.listen(PORT, () => console.log('Server started'));
+app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
