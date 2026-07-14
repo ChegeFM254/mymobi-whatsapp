@@ -5,13 +5,13 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ACCESS_TOKEN = 'EAAOxVVXxgvUBR7OKkZBEq90rZCnS6BYuAqVZAb1zMrudauyoJ5pQSgZBqyMenom1igE3DzSNpYaHkqv96a61pCaOPZCwBM0E5TroLkdsHpqJCW9h53IVSfiQDapOZBidBIkdfvWlC6knsa1c2fPSqLNeXdcCdTaiZCLpxggRH3opkhLQCzVfBjNjcJooKBZAyn8jdbwOMfQFMNCJVlwtjamfxZBUG0dOyERD9lJ6DE9sdUk8DWYZBqJMaqT9V8ym5g3YHhL2FeZBEa0CQqpnhYlZBURaUkGrDGMkwPTsHd0hjQZDZD';
+const ACCESS_TOKEN = 'EAAOxVVXxgvUBR87P5VZCKuGosB6bFeHgvNVb3iyi2NbmkZAZAU0BEEZBtiLHMjUcZCZAgZCFBuAGJivHc1LZAdSkehnNZBpqRKN1uNnH4ENBZBv7XmrRtLYpGQsh0ZAakzq8mfmpuhAASTDd1d1bwNkzDohQ6PF0lr4PhZA9QijKEb9kh9waatrBTfxffH0uOmWbTfcN9h6O8jbFQ0qmP2toyvvdCoUbJsw1NbUCH3bkvTYAbZCnkSSxXltPVBYYQFfZBHIWl3CvmA4ZBLiJE9jUkw9RG8f9OHWG1kUVp8y8uaOPwZDZD';
 const PHONE_NUMBER_ID = '1265967949926220';
 const VERIFY_TOKEN = 'mymobi_test_123';
 
 app.use(bodyParser.json());
 
-const userSessions = {}; // In-memory session (use Redis later)
+const userSessions = {};
 
 app.get('/webhook', (req, res) => {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
@@ -37,7 +37,7 @@ app.post('/webhook', async (req, res) => {
       await handleButton(from, buttonId, session);
     } else if (text) {
       await handleTextInput(from, text, session);
-    } else if (text.toLowerCase().includes('hi') || text.toLowerCase().includes('loan')) {
+    } else if (['hi', 'hello', 'loan'].some(w => text.toLowerCase().includes(w))) {
       await sendWelcome(from);
     }
   } catch (err) {
@@ -46,7 +46,7 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-// ==================== FULL FLOW ====================
+// ==================== SCREENS ====================
 
 async function sendWelcome(to) {
   const payload = {
@@ -153,8 +153,14 @@ async function sendEditOptions(to) {
   await sendMessage(to, payload);
 }
 
+// ==================== SUCCESS + RETURN TO HOME ====================
 async function sendSuccess(to) {
   await sendTextMessage(to, "✅ Registration Successful!\n\nYour details have been submitted. You will receive confirmation shortly.");
+
+  // Automatically return to Home/Menu
+  setTimeout(async () => {
+    await sendWelcome(to);
+  }, 1500);
 }
 
 // ==================== HANDLERS ====================
@@ -175,8 +181,8 @@ async function handleButton(to, id, session) {
     await sendEditOptions(to);
   } else if (id.startsWith("edit_")) {
     session.step = id;
-    const field = id.replace("edit_", "");
-    await sendTextMessage(to, `Enter new ${field.replace('_', ' ')}:`);
+    const fieldName = id.replace("edit_", "").replace("_", " ");
+    await sendTextMessage(to, `Enter new ${fieldName}:`);
   }
 }
 
@@ -202,6 +208,7 @@ async function handleTextInput(to, text, session) {
     if (field === "lastname") session.lastName = text;
     if (field === "upn") session.upn = text;
     if (field === "nationalid") session.nationalId = text;
+
     await sendConfirmation(to, session);
   }
 }
