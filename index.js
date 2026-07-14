@@ -33,9 +33,11 @@ app.post('/webhook', async (req, res) => {
     const buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
     const text = message.text?.body || '';
 
-    // Check for trigger words first
+    // Only trigger Welcome menu if user is at the start or explicitly asks
     const lowerText = text.toLowerCase().trim();
-    if (lowerText === 'hi' || lowerText === 'hello' || lowerText === 'loan' || lowerText.includes('start') || lowerText.includes('531')) {
+    const isTriggerWord = ['hi', 'hello', 'loan', 'start'].includes(lowerText) || lowerText.includes('531');
+
+    if (isTriggerWord && (session.step === 'welcome' || !session.step)) {
       await sendWelcome(from);
       return;
     }
@@ -50,6 +52,7 @@ app.post('/webhook', async (req, res) => {
   }
   res.sendStatus(200);
 });
+
 // ==================== SCREENS ====================
 
 async function sendWelcome(to) {
