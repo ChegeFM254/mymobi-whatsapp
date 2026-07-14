@@ -199,4 +199,32 @@ async function handleTextInput(to, text, session) {
   } else if (session.step.startsWith("edit_")) {
     const field = session.step.replace("edit_", "");
     if (field === "firstname") session.firstName = text;
-    if (field === "lastname") session.lastName
+    if (field === "lastname") session.lastName = text;
+    if (field === "upn") session.upn = text;
+    if (field === "nationalid") session.nationalId = text;
+
+    await sendConfirmation(to, session);
+  }
+}
+
+async function sendTextMessage(to, text) {
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "text",
+    text: { body: text }
+  };
+  await sendMessage(to, payload);
+}
+
+async function sendMessage(to, payload) {
+  try {
+    await axios.post(`https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`, payload, {
+      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
+    });
+  } catch (err) {
+    console.error("Send failed:", err.response?.data || err.message);
+  }
+}
+
+app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
