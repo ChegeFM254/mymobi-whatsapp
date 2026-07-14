@@ -181,7 +181,14 @@ async function sendEditOptions(to) {
 }
 
 async function sendSuccess(to) {
+  // 1. Send success message
   await sendTextMessage(to, "✅ Registration Successful!\n\nYour details have been submitted. You will receive confirmation shortly.");
+
+  // 2. Wait 5 seconds, then go back to Welcome/Home and close session
+  setTimeout(async () => {
+    await sendWelcome(to);
+    delete userSessions[to];           // Close the session
+  }, 5000); // 5 seconds
 }
 
 // ==================== HANDLERS ====================
