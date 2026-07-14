@@ -33,19 +33,23 @@ app.post('/webhook', async (req, res) => {
     const buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
     const text = message.text?.body || '';
 
+    // Check for trigger words first
+    const lowerText = text.toLowerCase().trim();
+    if (lowerText === 'hi' || lowerText === 'hello' || lowerText === 'loan' || lowerText.includes('start') || lowerText.includes('531')) {
+      await sendWelcome(from);
+      return;
+    }
+
     if (buttonId) {
       await handleButton(from, buttonId, session);
     } else if (text) {
       await handleTextInput(from, text, session);
-    } else if (['hi', 'hello', 'loan'].some(w => text.toLowerCase().includes(w))) {
-      await sendWelcome(from);
     }
   } catch (err) {
     console.error(err);
   }
   res.sendStatus(200);
 });
-
 // ==================== SCREENS ====================
 
 async function sendWelcome(to) {
