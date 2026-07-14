@@ -5,8 +5,8 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ACCESS_TOKEN = 'YOUR_TOKEN_HERE';
-const PHONE_NUMBER_ID = 'YOUR_PHONE_ID_HERE';
+const ACCESS_TOKEN = 'EAAOxVVXxgvUBR3nkWQLNMSEHU3DZCNGWE8eT1nZAZCajQ0ZAFwMUemn3NtYkqhkt2ZCsZAD0lH53eq62L9VOoaYCngF0YB3m2Y4H030cS3ZC2Q22gppTUf3tLPIPljXY5Iw48j8FyF5HY8XB2yCEo08r5sxfiWHw1VUqaE20wLoA2frC81kBzIVdw7fGePMUQdajgGMijtY3lQXuy8m3qbrPO9vxdPrGOUYZBOsORI5Cas95f4oGArUl4sdZCp5s79a0P2YQuWQtSbVoCVrF9DjuVmnT5ljQJK6mfwUP3nwZDZD';
+const PHONE_NUMBER_ID = '1225664000624541';
 const VERIFY_TOKEN = 'mymobi_test_123';
 
 app.use(bodyParser.json());
