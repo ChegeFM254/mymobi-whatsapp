@@ -133,12 +133,16 @@ async function sendTerms(to) {
 }
 
 async function sendConfirmation(to, session) {
-  const details = `Confirm Details:\n\n` +
-                  `Name: ${session.firstName || ''} ${session.lastName || ''}\n` +
-                  `UPN: ${session.upn || ''}\n` +
-                  `National ID: ${session.nationalId || ''}\n` +
-                  `Mobile Number (Mpesa): ${session.mobileNumber || ''}\n\n` +
-                  `Is this correct?`;
+  const details = 
+`Confirm Details:
+
+First Name: ${session.firstName || ''}
+Last Name: ${session.lastName || ''}
+UPN: ${session.upn || ''}
+National ID: ${session.nationalId || ''}
+Mobile Number (Mpesa): ${session.mobileNumber || ''}
+
+Is this correct?`;
 
   const payload = {
     messaging_product: "whatsapp",
