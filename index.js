@@ -195,9 +195,15 @@ async function handleButton(to, id, session) {
   if (id === "civil_servants") {
     session.step = "optin";
     await sendOptIn(to);
+  } else if (id === "optin_no") {
+  await sendWelcome(to);
+}
   } else if (id === "optin_yes") {
     session.step = "tc";
     await sendTerms(to);
+  } else if (id === "decline_tc") {
+  await sendWelcome(to);
+}
   } else if (id === "accept_tc") {
     session.step = "first_name";
     await sendTextMessage(to, "Enter your First Name");
