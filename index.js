@@ -236,6 +236,29 @@ async function handleButton(to, id, session) {
     if (fieldName === "mobilenumber") fieldName = "Mobile Number (Mpesa)";
     await sendTextMessage(to, `Enter new ${fieldName}:`);
   }
+// ==================== NEW: Confirm Details + Main Menu ====================
+
+  else if (id === "confirm_details") {
+    await triggerOTPAndShowEnterOTPScreen(to, session);
+  } 
+  else if (id === "exit_edit") {
+    await sendConfirmation(to, session);
+  } 
+  // Main Menu buttons (after PIN setup)
+  else if (id === "emergency_loan") {
+    await sendTextMessage(to, "You selected Emergency Loan. (Feature coming soon)");
+  } 
+  else if (id === "get_payslip") {
+    await sendTextMessage(to, "You selected Get Payslip. (Feature coming soon)");
+  } 
+  else if (id === "back" || id === "home") {
+    await sendWelcome(to);
+  } 
+  else if (id === "logout") {
+    await sendTextMessage(to, "You have been logged out.");
+    delete userSessions[to];
+  }
+  
 }
 
 async function handleTextInput(to, text, session) {
@@ -286,6 +309,56 @@ async function handleTextInput(to, text, session) {
 
     await sendConfirmation(to, session);
   }
+    // ==================== NEW: OTP & PIN HANDLING ====================
+  if (step === "enter_otp") {
+    const cleanText = text.trim();
+
+    if (!/^\d{5}$/.test(cleanText)) {
+      await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
+      return;
+    }
+
+    if (cleanText === session.otp) {
+      session.step = "enter_new_pin";
+      await sendEnterNewPIN(to);
+    } else {
+      session.otpAttempts = (session.otpAttempts || 0) + 1;
+
+      if (session.otpAttempts >= 3) {
+        await sendTextMessage(to, "PIN Deactivated. Please try again after 30 minutes.");
+        delete userSessions[to];
+      } else {
+        await sendTextMessage(to, `Incorrect PIN. You have ${3 - session.otpAttempts} attempt(s) remaining.`);
+      }
+    }
+    return;
+  }
+
+  if (step === "enter_new_pin") {
+    const cleanText = text.trim();
+
+    if (!/^\d{5}$/.test(cleanText)) {
+      await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+      return;
+    }
+
+    session.newPin = cleanText;
+    session.step = "confirm_new_pin";
+    await sendConfirmNewPIN(to);
+    return;
+  }
+
+  if (step === "confirm_new_pin") {
+    if (text.trim() === session.newPin) {
+      await sendRegistrationComplete(to);
+      delete userSessions[to];
+    } else {
+      await sendTextMessage(to, "PINs do not match. Please enter your new 5-digit PIN again:");
+      session.step = "enter_new_pin";
+    }
+    return;
+  }
+}
 }
 
 async function sendTextMessage(to, text) {
@@ -306,6 +379,55 @@ async function sendMessage(to, payload) {
   } catch (err) {
     console.error("Send failed:", err.response?.data || err.message);
   }
+}
+
+// ==================== NEW: OTP & PIN HANDLING ====================
+
+async function triggerOTPAndShowEnterOTPScreen(to, session) {
+    // TODO: Call your backend API to verify data and send OTP
+    session.otp = "12345";           // Replace this with real OTP from backend
+    session.otpAttempts = 0;
+    session.step = "enter_otp";
+
+    await sendTextMessage(to, "A 5-digit OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
+}
+
+async function sendEnterNewPIN(to) {
+    await sendTextMessage(to, "Enter your new 5-digit PIN:");
+}
+
+async function sendConfirmNewPIN(to) {
+    await sendTextMessage(to, "Confirm your new 5-digit PIN:");
+}
+
+async function sendRegistrationComplete(to) {
+    await sendTextMessage(to, "🎉 Registration Complete!\n\nYour account has been successfully set up.");
+
+    setTimeout(async () => {
+        await sendMainMenu(to);
+    }, 1500);
+}
+
+async function sendMainMenu(to) {
+    const payload = {
+        messaging_product: "whatsapp",
+        to: to,
+        type: "interactive",
+        interactive: {
+            type: "button",
+            body: { text: "What would you like to do?" },
+            action: {
+                buttons: [
+                    { type: "reply", reply: { id: "emergency_loan", title: "Emergency Loan" } },
+                    { type: "reply", reply: { id: "get_payslip", title: "Get Payslip" } },
+                    { type: "reply", reply: { id: "back", title: "Back" } },
+                    { type: "reply", reply: { id: "home", title: "Home" } },
+                    { type: "reply", reply: { id: "logout", title: "Logout" } }
+                ]
+            }
+        }
+    };
+    await sendMessage(to, payload);
 }
 
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
