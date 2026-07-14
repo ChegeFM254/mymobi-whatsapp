@@ -213,14 +213,14 @@ async function handleButton(to, id, session) {
   else if (id === "confirm_details") {
     await sendSuccess(to);
   } 
-  } else if (id === "edit_details") {
-  await sendEditOptions(to);
-} 
-else if (id.startsWith("edit_")) {
-  session.step = id;
-  const fieldName = id.replace("edit_", "").replace("_", " ");
-  await sendTextMessage(to, `Enter new ${fieldName}:`);
-}
+  else if (id === "edit_details") {
+    await sendEditOptions(to);
+  } 
+  else if (id.startsWith("edit_")) {
+    session.step = id;
+    const fieldName = id.replace("edit_", "").replace("_", " ");
+    await sendTextMessage(to, `Enter new ${fieldName}:`);
+  }
 }
 
 async function handleTextInput(to, text, session) {
