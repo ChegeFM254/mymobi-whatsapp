@@ -158,7 +158,13 @@ async function sendEditOptions(to) {
 }
 
 async function sendSuccess(to) {
+  // 1. Send success message first
   await sendTextMessage(to, "✅ Registration Successful!\n\nYour details have been submitted. You will receive confirmation shortly.");
+
+  // 2. Then automatically show the Welcome / Home page
+  setTimeout(async () => {
+    await sendWelcome(to);
+  }, 1200); // 1.2 second delay so user can read the success message
 }
 
 // ==================== HANDLERS ====================
