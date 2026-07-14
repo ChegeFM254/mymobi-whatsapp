@@ -37,9 +37,15 @@ app.post('/webhook', async (req, res) => {
         console.log("Sending Welcome message");
         await sendWelcome(from);
       } else if (message.interactive) {
-        const buttonId = message.interactive.button_reply?.id;
-        console.log(`Button pressed: ${buttonId}`);
-      }
+  const buttonId = message.interactive.button_reply?.id;
+  console.log(`Button pressed: ${buttonId}`);
+
+  if (buttonId === "civil_servants") {
+    await sendOptIn(to);
+  } else if (buttonId === "logout") {
+    await sendTextMessage(to, "👋 You have been logged out.");
+  }
+}
     }
   } catch (err) {
     console.error("Error processing message:", err);
