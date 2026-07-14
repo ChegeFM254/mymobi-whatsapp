@@ -268,16 +268,6 @@ async function sendMessage(to, payload) {
     await axios.post(`https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`, payload, {
       headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
     });
-  } catch (err) {
-    console.error("Send failed:", err.response?.data || err.message);
-  }
-}
-
-async function sendMessage(to, payload) {
-  try {
-    await axios.post(`https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`, payload, {
-      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
-    });
    
   } catch (err) {
     console.error("Send failed:", err.response?.data || err.message);
@@ -285,5 +275,3 @@ async function sendMessage(to, payload) {
 }
 
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
-
-// Updated Edit flow - 14 July 2026
