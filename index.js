@@ -194,30 +194,26 @@ async function handleButton(to, id, session) {
 }
 
 async function handleTextInput(to, text, session) {
-  const lowerText = text.toLowerCase().trim();
-
-  // Prevent trigger words from interfering with data entry
-  if (lowerText === 'hi' || lowerText === 'hello' || lowerText === 'loan') {
-    await sendWelcome(to);
-    return;
-  }
-
   if (session.step === "first_name") {
     session.firstName = text;
     session.step = "last_name";
     await sendTextMessage(to, "Enter your Last Name");
-  } else if (session.step === "last_name") {
+  } 
+  else if (session.step === "last_name") {
     session.lastName = text;
     session.step = "upn";
     await sendTextMessage(to, "Enter UPN");
-  } else if (session.step === "upn") {
+  } 
+  else if (session.step === "upn") {
     session.upn = text;
     session.step = "national_id";
     await sendTextMessage(to, "Enter National ID Number");
-  } else if (session.step === "national_id") {
+  } 
+  else if (session.step === "national_id") {
     session.nationalId = text;
     await sendConfirmation(to, session);
-  } else if (session.step.startsWith("edit_")) {
+  } 
+  else if (session.step.startsWith("edit_")) {
     const field = session.step.replace("edit_", "");
     if (field === "firstname") session.firstName = text;
     if (field === "lastname") session.lastName = text;
@@ -225,12 +221,9 @@ async function handleTextInput(to, text, session) {
     if (field === "nationalid") session.nationalId = text;
 
     await sendConfirmation(to, session);
-  } else {
-    // If user is not in a data entry step, show welcome
-    await sendWelcome(to);
   }
+  // No else clause — do nothing if step doesn't match
 }
-
 async function sendTextMessage(to, text) {
   const payload = {
     messaging_product: "whatsapp",
