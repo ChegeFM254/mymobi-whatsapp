@@ -359,7 +359,6 @@ async function handleTextInput(to, text, session) {
     return;
   }
 }
-}
 
 async function sendTextMessage(to, text) {
   const payload = {
