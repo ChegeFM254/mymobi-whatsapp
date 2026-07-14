@@ -257,7 +257,6 @@ async function handleTextInput(to, text, session) {
   }
 }
   // No else clause — do nothing if step doesn't match
-}
 async function sendTextMessage(to, text) {
   const payload = {
     messaging_product: "whatsapp",
