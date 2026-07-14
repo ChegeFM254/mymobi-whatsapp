@@ -159,15 +159,21 @@ async function sendEditOptions(to) {
     to: to,
     type: "interactive",
     interactive: {
-      type: "button",
+      type: "list",
+      header: { type: "text", text: "Edit Details" },
       body: { text: "Which field would you like to edit?" },
+      footer: { text: "MyMobi" },
       action: {
-        buttons: [
-          { type: "reply", reply: { id: "edit_firstname", title: "First Name" } },
-          { type: "reply", reply: { id: "edit_lastname", title: "Last Name" } },
-          { type: "reply", reply: { id: "edit_upn", title: "UPN" } },
-          { type: "reply", reply: { id: "edit_nationalid", title: "National ID" } }
-        ]
+        button: "Select Field",
+        sections: [{
+          title: "Available Fields",
+          rows: [
+            { id: "edit_firstname", title: "First Name", description: "Update your first name" },
+            { id: "edit_lastname", title: "Last Name", description: "Update your last name" },
+            { id: "edit_upn", title: "UPN", description: "Update your UPN" },
+            { id: "edit_nationalid", title: "National ID", description: "Update your National ID" }
+          ]
+        }]
       }
     }
   };
