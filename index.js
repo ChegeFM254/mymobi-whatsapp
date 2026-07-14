@@ -5,7 +5,7 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ACCESS_TOKEN = 'EAAOxVVXxgvUBRzs2TqOGnIyfTz03eQz8zMnAs1Kxm5Nygi33myDBtHKqDbgKnJPGCTQlt6ZCynDntZBaZCsb9hJVxgYmkaNEzYWF0XSTIfgEyQiWDxTRi1iV6wmmrIZCafZB8h8iQdrEV2rbDgbrWBU403L5ZCPKXdv1JbE4shp3ecFj18ddp0pALhQES3AQZDZD';
+const ACCESS_TOKEN = 'EAAOxVVXxgvUBR7plIZAJdMLog18rZCncZA8ZAefleXEPw9jJECvYZAGXN5KeIZCV6KBlcHOLI0LcFsxAzTdT6BJnfdnZC90tnMIKZAHW6HBGcuIpzp2K62FY9tI0NHwOuYCFgo3UmJ7Oi6R1kkqbzYZCXy7TOP5bavpv3oBRuFsWhZB8OBNVlD4kxQ8sJUEUeEFwIXFAyZAQgPv2ZANcnFM4WUWw2nhzSeQgYrW4xUWcxd26I0f076JTbCl5fZBgg6uXMjxpVmA0FBiusm4pQGZBZCZBLMtQallyow6p4OmlBlrG89uX';
 const PHONE_NUMBER_ID = '1265967949926220';
 const VERIFY_TOKEN = 'mymobi_test_123';
 
@@ -181,14 +181,7 @@ async function sendEditOptions(to) {
 }
 
 async function sendSuccess(to) {
-  // 1. Send success message
   await sendTextMessage(to, "✅ Registration Successful!\n\nYour details have been submitted. You will receive confirmation shortly.");
-
-  // 2. Wait 5 seconds, then go back to Welcome/Home and close session
-  setTimeout(async () => {
-    await sendWelcome(to);
-    delete userSessions[to];           // Close the session
-  }, 5000); // 5 seconds
 }
 
 // ==================== HANDLERS ====================
@@ -226,45 +219,47 @@ async function handleButton(to, id, session) {
 }
 
 async function handleTextInput(to, text, session) {
-  // Updated handleTextInput - 14 July 2026
   const cleanText = text.trim();
   const step = session.step;
 
-  switch (step) {
-    case "first_name":
-      session.firstName = cleanText;
-      session.step = "last_name";
-      await sendTextMessage(to, "Enter your Last Name");
-      return;
+  if (step === "first_name") {
+    session.firstName = cleanText;
+    session.step = "last_name";
+    await sendTextMessage(to, "Enter your Last Name");
+    await new Promise(r => setTimeout(r, 800)); // Stabilization delay
+    return;
+  }
 
-    case "last_name":
-      session.lastName = cleanText;
-      session.step = "upn";
-      await sendTextMessage(to, "Enter UPN");
-      return;
+  if (step === "last_name") {
+    session.lastName = cleanText;
+    session.step = "upn";
+    await sendTextMessage(to, "Enter UPN");
+    await new Promise(r => setTimeout(r, 800));
+    return;
+  }
 
-    case "upn":
-      session.upn = cleanText;
-      session.step = "national_id";
-      await sendTextMessage(to, "Enter National ID Number");
-      return;
+  if (step === "upn") {
+    session.upn = cleanText;
+    session.step = "national_id";
+    await sendTextMessage(to, "Enter National ID Number");
+    await new Promise(r => setTimeout(r, 800));
+    return;
+  }
 
-    case "national_id":
-      session.nationalId = cleanText;
-      await sendConfirmation(to, session);
-      return;
+  if (step === "national_id") {
+    session.nationalId = cleanText;
+    await sendConfirmation(to, session);
+    return;
+  }
 
-    default:
-      if (step.startsWith("edit_")) {
-        const field = step.replace("edit_", "");
-        if (field === "firstname") session.firstName = cleanText;
-        if (field === "lastname") session.lastName = cleanText;
-        if (field === "upn") session.upn = cleanText;
-        if (field === "nationalid") session.nationalId = cleanText;
+  if (step.startsWith("edit_")) {
+    const field = step.replace("edit_", "");
+    if (field === "firstname") session.firstName = cleanText;
+    if (field === "lastname") session.lastName = cleanText;
+    if (field === "upn") session.upn = cleanText;
+    if (field === "nationalid") session.nationalId = cleanText;
 
-        await sendConfirmation(to, session);
-      }
-      return;
+    await sendConfirmation(to, session);
   }
 }
 
