@@ -219,35 +219,37 @@ async function handleButton(to, id, session) {
 }
 
 async function handleTextInput(to, text, session) {
-  if (session.step === "first_name") {
+  const currentStep = session.step;
+
+  if (currentStep === "first_name") {
     session.firstName = text;
     session.step = "last_name";
     await sendTextMessage(to, "Enter your Last Name");
     return;
   } 
   
-  if (session.step === "last_name") {
+  if (currentStep === "last_name") {
     session.lastName = text;
     session.step = "upn";
     await sendTextMessage(to, "Enter UPN");
     return;
   } 
   
-  if (session.step === "upn") {
+  if (currentStep === "upn") {
     session.upn = text;
     session.step = "national_id";
     await sendTextMessage(to, "Enter National ID Number");
     return;
   } 
   
-  if (session.step === "national_id") {
+  if (currentStep === "national_id") {
     session.nationalId = text;
     await sendConfirmation(to, session);
     return;
   } 
   
-  if (session.step.startsWith("edit_")) {
-    const field = session.step.replace("edit_", "");
+  if (currentStep.startsWith("edit_")) {
+    const field = currentStep.replace("edit_", "");
     if (field === "firstname") session.firstName = text;
     if (field === "lastname") session.lastName = text;
     if (field === "upn") session.upn = text;
