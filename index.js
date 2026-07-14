@@ -133,7 +133,12 @@ async function sendTerms(to) {
 }
 
 async function sendConfirmation(to, session) {
-  const details = `Confirm Details:\n\nName: ${session.firstName || ''} ${session.lastName || ''}\nUPN: ${session.upn || ''}\nNational ID: ${session.nationalId || ''}\n\nIs this correct?`;
+  const details = `Confirm Details:\n\n` +
+                  `Name: ${session.firstName || ''} ${session.lastName || ''}\n` +
+                  `UPN: ${session.upn || ''}\n` +
+                  `National ID: ${session.nationalId || ''}\n` +
+                  `Mobile Number (Mpesa): ${session.mobileNumber || ''}\n\n` +
+                  `Is this correct?`;
 
   const payload = {
     messaging_product: "whatsapp",
@@ -171,7 +176,9 @@ async function sendEditOptions(to) {
             { id: "edit_firstname", title: "First Name", description: "Update your first name" },
             { id: "edit_lastname", title: "Last Name", description: "Update your last name" },
             { id: "edit_upn", title: "UPN", description: "Update your UPN" },
-            { id: "edit_nationalid", title: "National ID", description: "Update your National ID" }
+            { id: "edit_nationalid", title: "National ID", description: "Update your National ID" },
+            { id: "edit_mobilenumber", title: "Mobile Number (Mpesa)", description: "Update your M-Pesa number" },
+            { id: "exit_edit", title: "Exit", description: "Return to Confirm Details" }
           ]
         }]
       }
@@ -181,7 +188,12 @@ async function sendEditOptions(to) {
 }
 
 async function sendSuccess(to) {
-  await sendTextMessage(to, "✅ Registration Successful!\n\nYour details have been submitted. You will receive confirmation shortly.");
+  await sendTextMessage(to, "✅ Registration Data Received\n\nThank you. Your details have been received and are being processed. You will be notified of the outcome shortly.");
+
+  setTimeout(async () => {
+    await sendWelcome(to);
+    delete userSessions[to];
+  }, 5000);
 }
 
 // ==================== HANDLERS ====================
@@ -211,9 +223,13 @@ async function handleButton(to, id, session) {
   else if (id === "edit_details") {
     await sendEditOptions(to);
   } 
+  else if (id === "exit_edit") {
+    await sendConfirmation(to, session);
+  } 
   else if (id.startsWith("edit_")) {
     session.step = id;
-    const fieldName = id.replace("edit_", "").replace("_", " ");
+    let fieldName = id.replace("edit_", "").replace("_", " ");
+    if (fieldName === "mobilenumber") fieldName = "Mobile Number (Mpesa)";
     await sendTextMessage(to, `Enter new ${fieldName}:`);
   }
 }
@@ -226,7 +242,6 @@ async function handleTextInput(to, text, session) {
     session.firstName = cleanText;
     session.step = "last_name";
     await sendTextMessage(to, "Enter your Last Name");
-    await new Promise(r => setTimeout(r, 800)); // Stabilization delay
     return;
   }
 
@@ -234,7 +249,6 @@ async function handleTextInput(to, text, session) {
     session.lastName = cleanText;
     session.step = "upn";
     await sendTextMessage(to, "Enter UPN");
-    await new Promise(r => setTimeout(r, 800));
     return;
   }
 
@@ -242,12 +256,18 @@ async function handleTextInput(to, text, session) {
     session.upn = cleanText;
     session.step = "national_id";
     await sendTextMessage(to, "Enter National ID Number");
-    await new Promise(r => setTimeout(r, 800));
     return;
   }
 
   if (step === "national_id") {
     session.nationalId = cleanText;
+    session.step = "mobile_number";
+    await sendTextMessage(to, "Enter Mobile Number (Mpesa)");
+    return;
+  }
+
+  if (step === "mobile_number") {
+    session.mobileNumber = cleanText;
     await sendConfirmation(to, session);
     return;
   }
@@ -258,6 +278,7 @@ async function handleTextInput(to, text, session) {
     if (field === "lastname") session.lastName = cleanText;
     if (field === "upn") session.upn = cleanText;
     if (field === "nationalid") session.nationalId = cleanText;
+    if (field === "mobilenumber") session.mobileNumber = cleanText;
 
     await sendConfirmation(to, session);
   }
