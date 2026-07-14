@@ -11,10 +11,6 @@ const VERIFY_TOKEN = 'mymobi_test_123';
 
 app.use(bodyParser.json());
 
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 const userSessions = {};
 
 // 60-second inactivity timeout
@@ -27,7 +23,7 @@ function resetTimeout(from) {
     await sendTextMessage(from, "⏰ Your session has timed out due to inactivity.");
     await sendWelcome(from);
     delete userSessions[from];
-  }, 60000); // 60 seconds
+  }, 60000);
 }
 
 app.get('/webhook', (req, res) => {
@@ -44,15 +40,14 @@ app.post('/webhook', async (req, res) => {
     if (!message) return res.sendStatus(200);
 
     const from = message.from;
-if (!userSessions[from]) userSessions[from] = { step: 'welcome' };
+    if (!userSessions[from]) userSessions[from] = { step: 'welcome' };
 
-resetTimeout(from); // Reset 60-second timer
+    resetTimeout(from);
 
     const session = userSessions[from];
     const buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
     const text = message.text?.body || '';
 
-    // Only trigger Welcome menu if user is at the start or explicitly asks
     const lowerText = text.toLowerCase().trim();
     const isTriggerWord = ['hi', 'hello', 'loan', 'start'].includes(lowerText) || lowerText.includes('531');
 
@@ -180,13 +175,10 @@ async function sendEditOptions(to) {
 }
 
 async function sendSuccess(to) {
-  // 1. Send success message first
   await sendTextMessage(to, "✅ Registration Successful!\n\nYour details have been submitted. You will receive confirmation shortly.");
-
-  // 2. Then automatically show the Welcome / Home page
   setTimeout(async () => {
     await sendWelcome(to);
-  }, 1200); // 1.2 second delay so user can read the success message
+  }, 3000);
 }
 
 // ==================== HANDLERS ====================
@@ -253,6 +245,7 @@ async function handleTextInput(to, text, session) {
     await sendConfirmation(to, session);
   }
 }
+
 async function sendTextMessage(to, text) {
   const payload = {
     messaging_product: "whatsapp",
@@ -268,7 +261,6 @@ async function sendMessage(to, payload) {
     await axios.post(`https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`, payload, {
       headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
     });
-   
   } catch (err) {
     console.error("Send failed:", err.response?.data || err.message);
   }
