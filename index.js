@@ -226,6 +226,7 @@ async function handleButton(to, id, session) {
 }
 
 async function handleTextInput(to, text, session) {
+  // Updated handleTextInput - 14 July 2026
   const cleanText = text.trim();
   const step = session.step;
 
