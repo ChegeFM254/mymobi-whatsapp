@@ -182,9 +182,6 @@ async function sendEditOptions(to) {
 
 async function sendSuccess(to) {
   await sendTextMessage(to, "✅ Registration Successful!\n\nYour details have been submitted. You will receive confirmation shortly.");
-  setTimeout(async () => {
-    await sendWelcome(to);
-  }, 3000);
 }
 
 // ==================== HANDLERS ====================
