@@ -219,41 +219,42 @@ async function handleButton(to, id, session) {
 }
 
 async function handleTextInput(to, text, session) {
+  const cleanText = text.trim();           // ← This removes leading/trailing spaces
   const step = session.step;
 
   if (step === "first_name") {
-    session.firstName = text;
+    session.firstName = cleanText;
     session.step = "last_name";
     await sendTextMessage(to, "Enter your Last Name");
     return;
-  }
-
+  } 
+  
   if (step === "last_name") {
-    session.lastName = text;
+    session.lastName = cleanText;
     session.step = "upn";
     await sendTextMessage(to, "Enter UPN");
     return;
-  }
-
+  } 
+  
   if (step === "upn") {
-    session.upn = text;
+    session.upn = cleanText;
     session.step = "national_id";
     await sendTextMessage(to, "Enter National ID Number");
     return;
-  }
-
+  } 
+  
   if (step === "national_id") {
-    session.nationalId = text;
+    session.nationalId = cleanText;
     await sendConfirmation(to, session);
     return;
-  }
-
+  } 
+  
   if (step.startsWith("edit_")) {
     const field = step.replace("edit_", "");
-    if (field === "firstname") session.firstName = text;
-    if (field === "lastname") session.lastName = text;
-    if (field === "upn") session.upn = text;
-    if (field === "nationalid") session.nationalId = text;
+    if (field === "firstname") session.firstName = cleanText;
+    if (field === "lastname") session.lastName = cleanText;
+    if (field === "upn") session.upn = cleanText;
+    if (field === "nationalid") session.nationalId = cleanText;
 
     await sendConfirmation(to, session);
   }
