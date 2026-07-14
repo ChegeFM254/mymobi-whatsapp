@@ -195,23 +195,28 @@ async function handleButton(to, id, session) {
   if (id === "civil_servants") {
     session.step = "optin";
     await sendOptIn(to);
-  } else if (id === "optin_no") {
-  await sendWelcome(to);
-}
-  } else if (id === "optin_yes") {
+  } 
+  else if (id === "optin_yes") {
     session.step = "tc";
     await sendTerms(to);
-  } else if (id === "decline_tc") {
-  await sendWelcome(to);
-}
-  } else if (id === "accept_tc") {
+  } 
+  else if (id === "optin_no") {
+    await sendWelcome(to);
+  } 
+  else if (id === "accept_tc") {
     session.step = "first_name";
     await sendTextMessage(to, "Enter your First Name");
-  } else if (id === "confirm_details") {
+  } 
+  else if (id === "decline_tc") {
+    await sendWelcome(to);
+  } 
+  else if (id === "confirm_details") {
     await sendSuccess(to);
-  } else if (id === "edit_details") {
+  } 
+  else if (id === "edit_details") {
     await sendEditOptions(to);
-  } else if (id.startsWith("edit_")) {
+  } 
+  else if (id.startsWith("edit_")) {
     session.step = id;
     const fieldName = id.replace("edit_", "").replace("_", " ");
     await sendTextMessage(to, `Enter new ${fieldName}:`);
