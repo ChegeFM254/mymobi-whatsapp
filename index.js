@@ -236,7 +236,7 @@ async function sendTextMessage(to, text) {
     text: { body: text }
   };
   await sendMessage(to, payload);
-  await delay(3000); // 3 seconds delay
+  await delay(7000); // 7 seconds delay
 }
 
 async function sendMessage(to, payload) {
@@ -244,7 +244,7 @@ async function sendMessage(to, payload) {
     await axios.post(`https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`, payload, {
       headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
     });
-    await delay(3000); // 3 seconds delay after every message
+    await delay(7000); // 7 seconds delay after every message
   } catch (err) {
     console.error("Send failed:", err.response?.data || err.message);
   }
