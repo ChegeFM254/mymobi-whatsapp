@@ -244,14 +244,18 @@ async function handleTextInput(to, text, session) {
     await sendConfirmation(to, session);
   } 
   else if (session.step.startsWith("edit_")) {
+    // This part handles editing and goes back to Confirm Details
     const field = session.step.replace("edit_", "");
+    
     if (field === "firstname") session.firstName = text;
     if (field === "lastname") session.lastName = text;
     if (field === "upn") session.upn = text;
     if (field === "nationalid") session.nationalId = text;
 
+    // Go back to Confirm Details screen after editing
     await sendConfirmation(to, session);
   }
+}
   // No else clause — do nothing if step doesn't match
 }
 async function sendTextMessage(to, text) {
