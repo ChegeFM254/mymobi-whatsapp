@@ -185,6 +185,14 @@ async function handleButton(to, id, session) {
 }
 
 async function handleTextInput(to, text, session) {
+  const lowerText = text.toLowerCase().trim();
+
+  // Prevent trigger words from interfering with data entry
+  if (lowerText === 'hi' || lowerText === 'hello' || lowerText === 'loan') {
+    await sendWelcome(to);
+    return;
+  }
+
   if (session.step === "first_name") {
     session.firstName = text;
     session.step = "last_name";
@@ -208,6 +216,9 @@ async function handleTextInput(to, text, session) {
     if (field === "nationalid") session.nationalId = text;
 
     await sendConfirmation(to, session);
+  } else {
+    // If user is not in a data entry step, show welcome
+    await sendWelcome(to);
   }
 }
 
