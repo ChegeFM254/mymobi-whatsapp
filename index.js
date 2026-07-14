@@ -220,22 +220,30 @@ async function handleTextInput(to, text, session) {
     session.firstName = text;
     session.step = "last_name";
     await sendTextMessage(to, "Enter your Last Name");
+    return;
   } 
-  else if (session.step === "last_name") {
+  
+  if (session.step === "last_name") {
     session.lastName = text;
     session.step = "upn";
     await sendTextMessage(to, "Enter UPN");
+    return;
   } 
-  else if (session.step === "upn") {
+  
+  if (session.step === "upn") {
     session.upn = text;
     session.step = "national_id";
     await sendTextMessage(to, "Enter National ID Number");
+    return;
   } 
-  else if (session.step === "national_id") {
+  
+  if (session.step === "national_id") {
     session.nationalId = text;
     await sendConfirmation(to, session);
+    return;
   } 
-  else if (session.step.startsWith("edit_")) {
+  
+  if (session.step.startsWith("edit_")) {
     const field = session.step.replace("edit_", "");
     if (field === "firstname") session.firstName = text;
     if (field === "lastname") session.lastName = text;
