@@ -17,16 +17,16 @@ function delay(ms) {
 
 const userSessions = {};
 
-// ==================== INACTIVITY TIMEOUT (60 seconds) ====================
+// 60-second inactivity timeout
 function resetTimeout(from) {
   if (userSessions[from] && userSessions[from].timeoutId) {
     clearTimeout(userSessions[from].timeoutId);
   }
 
   userSessions[from].timeoutId = setTimeout(async () => {
-    await sendTextMessage(from, "⏰ Session timed out due to inactivity.");
+    await sendTextMessage(from, "⏰ Your session has timed out due to inactivity.");
     await sendWelcome(from);
-    delete userSessions[from]; // Clear session
+    delete userSessions[from];
   }, 60000); // 60 seconds
 }
 
@@ -46,7 +46,7 @@ app.post('/webhook', async (req, res) => {
     const from = message.from;
 if (!userSessions[from]) userSessions[from] = { step: 'welcome' };
 
-resetTimeout(from); // Reset 60-second timer on every message
+resetTimeout(from); // Reset 60-second timer
 
     const session = userSessions[from];
     const buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
@@ -268,7 +268,7 @@ async function sendMessage(to, payload) {
     await axios.post(`https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`, payload, {
       headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
     });
-    await delay(7000); // 7 seconds delay after every message
+   
   } catch (err) {
     console.error("Send failed:", err.response?.data || err.message);
   }
