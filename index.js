@@ -5,7 +5,7 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ACCESS_TOKEN = 'EAAOxVVXxgvUBRzFCWqxUqBtux5R5ZBaN2UqlZBr9KGcot94tyC3BbVAC6fZBqfHexpask1x4r9TmAZCt8twyGBMOZBzdqlJM8jlRy7nF6OODsNaQNUzk23CPelIUPbr98EVsa2fV2ZCWZAHucM6YvK3UPUMLYMykmEbf3b014XsUfnDF73k7NMujqL3gh53PZB2JfXqtiFu5dZAwAwDicApbzfKPoXXA1ATH1UATZCBZCW580eeNdO7jX2bMrsobd2rT7AYFD5LyUK1mlhhkNtcZAmo6t41jAxTKz36mFpOl8E0ZD';
+const ACCESS_TOKEN = 'EAAOxVVXxgvUBR9uCZCUrwCVYrQri56MBWpZCRAV8FzCfgosQ1AwvLAILAR3eT2XqCkOj0ZAd7ICfr1OsSYWzPomuw9SdeuD46c4BNYBBYROaXkAwL3msZCO2nERbyGxzL85iljY1lSLTkfJ6tiJMEwCbwdzHLtWJl05ymoxTEL2dWR8kKfCbdfIeJcgLX4gZBm0nczYFwUDZA4FB64hkiWW0bI84yX9b5FBWBvFCNalJRDbmR6CTGnNlrWR2hYDgQDawMZARgl5UIfV1xW1Epou3jaaXv4u1zis89RQ6AZDZD';
 const PHONE_NUMBER_ID = '1265967949926220';
 const VERIFY_TOKEN = 'mymobi_test_123';
 
@@ -153,7 +153,6 @@ async function sendEditOptions(to) {
   await sendMessage(to, payload);
 }
 
-// ==================== SUCCESS + RETURN TO HOME ====================
 async function sendSuccess(to) {
   await sendTextMessage(to, "✅ Registration Successful!\n\nYour details have been submitted. You will receive confirmation shortly.");
 }
@@ -200,32 +199,4 @@ async function handleTextInput(to, text, session) {
   } else if (session.step.startsWith("edit_")) {
     const field = session.step.replace("edit_", "");
     if (field === "firstname") session.firstName = text;
-    if (field === "lastname") session.lastName = text;
-    if (field === "upn") session.upn = text;
-    if (field === "nationalid") session.nationalId = text;
-
-    await sendConfirmation(to, session);
-  }
-}
-
-async function sendTextMessage(to, text) {
-  const payload = {
-    messaging_product: "whatsapp",
-    to: to,
-    type: "text",
-    text: { body: text }
-  };
-  await sendMessage(to, payload);
-}
-
-async function sendMessage(to, payload) {
-  try {
-    await axios.post(`https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`, payload, {
-      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
-    });
-  } catch (err) {
-    console.error("Send failed:", err.response?.data || err.message);
-  }
-}
-
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+    if (field === "lastname") session.lastName
