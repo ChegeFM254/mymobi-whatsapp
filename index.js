@@ -156,11 +156,6 @@ async function sendEditOptions(to) {
 // ==================== SUCCESS + RETURN TO HOME ====================
 async function sendSuccess(to) {
   await sendTextMessage(to, "✅ Registration Successful!\n\nYour details have been submitted. You will receive confirmation shortly.");
-
-  // Automatically return to Home/Menu
-  setTimeout(async () => {
-    await sendWelcome(to);
-  }, 1500);
 }
 
 // ==================== HANDLERS ====================
