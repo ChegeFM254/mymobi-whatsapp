@@ -191,6 +191,16 @@ async function sendEditOptions(to) {
   await sendMessage(to, payload);
 }
 
+async function triggerOTPAndShowEnterOTPScreen(to, session) {
+    // TODO: Call your backend to verify the data and send the OTP
+    // For now, we are using a dummy OTP for testing
+    session.otp = "12345";           
+    session.otpAttempts = 0;
+    session.step = "enter_otp";
+
+    await sendTextMessage(to, "A 5-digit OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
+}
+
 async function sendSuccess(to) {
   await sendTextMessage(to, "✅ Registration Data Received\n\nThank you. Your details have been received and are being processed. You will be notified of the outcome shortly.");
 
