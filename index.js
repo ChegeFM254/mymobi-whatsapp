@@ -5,7 +5,7 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ACCESS_TOKEN = 'EAAOxVVXxgvUBR01nZBbMLrVKxZCrTQUmPeUY1lnGA4puD9ewOjogRL7RS5XAnjhrIv2Mf1RzbyTJonusScaVDHCQY6wnD3icZBKvdJhlhkC9wxy4bL2juugVy00JNwNncs2zelGrZAklDelxPngH9JTuetRLKEF8FYEnGiCh0ThTHhwQHqPZAQmGv338a7AZDZD';
+const ACCESS_TOKEN = 'EAAOxVVXxgvUBR57Y5nezVEiL42Ln4BoqhSwMxLCcIXAHCH5MUhmfrS9X8oFnZBgEfSZBt6NL1N0eBCxrMw7A91ZBvpJg4ND4NTUKzZAIuy5CyzYHWcqwjNHswRmd3HmGggvjHRuPRJ4HTWqbhSTpSPRR8Di0OAiZB1MPSgFtTwE08ekep8nIE8uGdTKq2ewZDZD';
 const PHONE_NUMBER_ID = '1265967949926220';
 const VERIFY_TOKEN = 'mymobi_test_123';
 
