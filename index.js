@@ -354,11 +354,11 @@ async function handleTextInput(to, text, session) {
     if (field === "mobilenumber") session.mobileNumber = cleanText;
 
     await sendConfirmation(to, session);
+    return;
   }
-    // ==================== NEW: OTP & PIN HANDLING ====================
-  if (step === "enter_otp") {
-    const cleanText = text.trim();
 
+  // ==================== NEW: OTP & PIN HANDLING ====================
+  if (step === "enter_otp") {
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
       return;
@@ -381,8 +381,6 @@ async function handleTextInput(to, text, session) {
   }
 
   if (step === "enter_new_pin") {
-    const cleanText = text.trim();
-
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
       return;
@@ -395,10 +393,8 @@ async function handleTextInput(to, text, session) {
   }
 
   if (step === "confirm_new_pin") {
-    if (text.trim() === session.newPin) {
-  await sendRegistrationComplete(to);
-  // Do NOT delete session here — let sendRegistrationComplete handle the menu
-}
+    if (cleanText === session.newPin) {
+      await sendRegistrationComplete(to);
     } else {
       await sendTextMessage(to, "PINs do not match. Please enter your new 5-digit PIN again:");
       session.step = "enter_new_pin";
