@@ -294,38 +294,38 @@ async function sendSuccess(to) {
 
 async function handleButton(to, id, session) {
   if (id === "civil_servants") {
-  const user = registeredUsers[from];
+  const user = registeredUsers[to];
 
   if (user && user.status === "blocked") {
-    await sendTextMessage(from, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
+    await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
     return;
   }
 
   if (user && user.status === "active") {
     // Returning user - show authentication options
     session.step = "auth_menu";
-    await sendAuthMenu(from);
+    await sendAuthMenu(to);
   } else {
     // New user or opted out - start registration
     session.step = "optin";
-    await sendOptIn(from);
+    await sendOptIn(to);
   }
 }
     // ==================== AUTHENTICATION MENU (Returning Users) ====================
   else if (id === "enter_pin") {
     session.step = "enter_pin";
-    await sendTextMessage(from, "Enter your 5-digit PIN:");
+    await sendTextMessage(to, "Enter your 5-digit PIN:");
   }
   else if (id === "forgot_pin") {
   session.step = "forgot_pin";
-  await sendTextMessage(from, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
+  await sendTextMessage(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
   // For now, we simulate OTP
   session.otp = "67890"; // Different from registration OTP
 }
 
 else if (id === "opt_out") {
   session.step = "opt_out_confirmation";
-  await sendTextMessage(from, "You are about to OPT OUT of Emergency Loan Services.\n\nDo you want to proceed? (Yes/No)");
+  await sendTextMessage(to, "You are about to OPT OUT of Emergency Loan Services.\n\nDo you want to proceed? (Yes/No)");
 }
   else if (id === "optin_yes") {
     session.step = "tc";
