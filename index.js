@@ -20,10 +20,12 @@ function resetTimeout(from) {
   }
 
   userSessions[from].timeoutId = setTimeout(async () => {
+    // Send timeout message (optional - you can remove this line if you want it completely silent)
     await sendTextMessage(from, "⏰ Your session has timed out due to inactivity.");
-    await sendWelcome(from);
+
+    // Just delete the session — do NOT resend the Welcome page
     delete userSessions[from];
-  }, 60000);
+  }, 60000); // 60 seconds
 }
 
 app.get('/webhook', (req, res) => {
