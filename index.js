@@ -415,16 +415,24 @@ async function handleTextInput(to, text, session) {
   }
 
   if (step === "enter_new_pin") {
+    const cleanText = text.trim();
+
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
-      return;
+        await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+        return;
+    }
+
+    // New rule: PIN cannot be the same as OTP
+    if (cleanText === session.otp) {
+        await sendTextMessage(to, "Your new PIN cannot be the same as the OTP you just entered. Please choose a different 5-digit PIN.");
+        return;
     }
 
     session.newPin = cleanText;
     session.step = "confirm_new_pin";
     await sendConfirmNewPIN(to);
     return;
-  }
+}
 
   if (step === "confirm_new_pin") {
     if (cleanText === session.newPin) {
@@ -478,6 +486,12 @@ async function sendConfirmNewPIN(to) {
 
 async function sendRegistrationComplete(to) {
     await sendTextMessage(to, "🎉 Registration Complete!\n\nYour account has been successfully set up.");
+
+    // Clear sensitive data from session after successful registration
+    if (userSessions[to]) {
+        delete userSessions[to].otp;
+        delete userSessions[to].newPin;
+    }
 
     setTimeout(async () => {
         await sendMainMenu(to);
