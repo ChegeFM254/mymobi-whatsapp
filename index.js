@@ -318,7 +318,12 @@ async function handleTextInput(to, text, session) {
   const cleanText = text.trim();
   const step = session.step;
 
+  // ==================== DATA COLLECTION WITH VALIDATION ====================
   if (step === "first_name") {
+    if (!cleanText) {
+      await sendTextMessage(to, "Please enter your First Name.");
+      return;
+    }
     session.firstName = cleanText;
     session.step = "last_name";
     await sendTextMessage(to, "Enter your Last Name");
@@ -326,6 +331,10 @@ async function handleTextInput(to, text, session) {
   }
 
   if (step === "last_name") {
+    if (!cleanText) {
+      await sendTextMessage(to, "Please enter your Last Name.");
+      return;
+    }
     session.lastName = cleanText;
     session.step = "upn";
     await sendTextMessage(to, "Enter UPN");
@@ -333,6 +342,10 @@ async function handleTextInput(to, text, session) {
   }
 
   if (step === "upn") {
+    if (!cleanText) {
+      await sendTextMessage(to, "Please enter your UPN.");
+      return;
+    }
     session.upn = cleanText;
     session.step = "national_id";
     await sendTextMessage(to, "Enter National ID Number");
@@ -340,6 +353,10 @@ async function handleTextInput(to, text, session) {
   }
 
   if (step === "national_id") {
+    if (!cleanText) {
+      await sendTextMessage(to, "Please enter your National ID Number.");
+      return;
+    }
     session.nationalId = cleanText;
     session.step = "mobile_number";
     await sendTextMessage(to, "Enter Mobile Number (Mpesa)");
@@ -347,12 +364,22 @@ async function handleTextInput(to, text, session) {
   }
 
   if (step === "mobile_number") {
+    if (!cleanText) {
+      await sendTextMessage(to, "Please enter your Mobile Number (Mpesa).");
+      return;
+    }
     session.mobileNumber = cleanText;
     await sendConfirmation(to, session);
     return;
   }
 
+  // ==================== EDIT FLOW ====================
   if (step.startsWith("edit_")) {
+    if (!cleanText) {
+      await sendTextMessage(to, "Please enter a valid value.");
+      return;
+    }
+
     const field = step.replace("edit_", "");
     if (field === "firstname") session.firstName = cleanText;
     if (field === "lastname") session.lastName = cleanText;
@@ -364,7 +391,7 @@ async function handleTextInput(to, text, session) {
     return;
   }
 
-  // ==================== NEW: OTP & PIN HANDLING ====================
+  // ==================== OTP & PIN HANDLING ====================
   if (step === "enter_otp") {
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
