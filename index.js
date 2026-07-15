@@ -484,26 +484,4 @@ async function sendRegistrationComplete(to) {
     }, 1500);
 }
 
-async function sendMainMenu(to) {
-    const payload = {
-        messaging_product: "whatsapp",
-        to: to,
-        type: "interactive",
-        interactive: {
-            type: "button",
-            body: { text: "What would you like to do?" },
-            action: {
-                buttons: [
-                    { type: "reply", reply: { id: "emergency_loan", title: "Emergency Loan" } },
-                    { type: "reply", reply: { id: "get_payslip", title: "Get Payslip" } },
-                    { type: "reply", reply: { id: "back", title: "Back" } },
-                    { type: "reply", reply: { id: "home", title: "Home" } },
-                    { type: "reply", reply: { id: "logout", title: "Logout" } }
-                ]
-            }
-        }
-    };
-    await sendMessage(to, payload);
-}
-
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
