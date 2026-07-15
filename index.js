@@ -220,6 +220,7 @@ async function sendRegistrationComplete(to) {
 }
 
 async function sendMainMenu(to) {
+    // Updated Main Menu to List - 15 July 2026
     const payload = {
         messaging_product: "whatsapp",
         to: to,
