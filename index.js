@@ -192,9 +192,8 @@ async function sendEditOptions(to) {
 }
 
 async function triggerOTPAndShowEnterOTPScreen(to, session) {
-    // TODO: Call your backend to verify the data and send the OTP
-    // For now, we are using a dummy OTP for testing
-    session.otp = "12345";           
+    // Simulate OTP sending (no backend needed)
+    session.otp = "12345";           // Fixed OTP for testing
     session.otpAttempts = 0;
     session.step = "enter_otp";
 
