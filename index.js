@@ -5,13 +5,16 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ACCESS_TOKEN = 'EAAOxVVXxgvUBR57Y5nezVEiL42Ln4BoqhSwMxLCcIXAHCH5MUhmfrS9X8oFnZBgEfSZBt6NL1N0eBCxrMw7A91ZBvpJg4ND4NTUKzZAIuy5CyzYHWcqwjNHswRmd3HmGggvjHRuPRJ4HTWqbhSTpSPRR8Di0OAiZB1MPSgFtTwE08ekep8nIE8uGdTKq2ewZDZD';
+const ACCESS_TOKEN = 'EAAOxVVXxgvUBR7svwHyWiv43GMt7HohlucbAdrvo3QWhqOh6lG1WPPZBi4kBnapbE5UK7IPDUXDgMXGshZBXvyOQBoZBHdRc6ZAZChqvx1RvC11IbdamGNPQSCV1c5w2OUDKxbyaP1Xwb21qqsXRWMu4Fj0kSiaVr39r4aC5Kz8t0vOtWoxRbZCqGnvY3iggZDZD';
 const PHONE_NUMBER_ID = '1265967949926220';
 const VERIFY_TOKEN = 'mymobi_test_123';
 
 app.use(bodyParser.json());
 
 const userSessions = {};
+
+// ==================== REGISTERED USERS STORAGE ====================
+const registeredUsers = {};   // Key = WhatsApp number (from), Value = user data
 
 // 60-second inactivity timeout
 function resetTimeout(from) {
@@ -198,6 +201,26 @@ async function sendEditOptions(to) {
   await sendMessage(to, payload);
 }
 
+async function sendAuthMenu(to) {
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: "Welcome back! Please choose an option:" },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "enter_pin", title: "Enter PIN" } },
+          { type: "reply", reply: { id: "forgot_pin", title: "Forgot PIN" } },
+          { type: "reply", reply: { id: "opt_out", title: "Opt Out" } }
+        ]
+      }
+    }
+  };
+  await sendMessage(to, payload);
+}
+
 async function triggerOTPAndShowEnterOTPScreen(to, session) {
     session.otp = "12345";
     session.otpAttempts = 0;
@@ -271,9 +294,39 @@ async function sendSuccess(to) {
 
 async function handleButton(to, id, session) {
   if (id === "civil_servants") {
+  const user = registeredUsers[from];
+
+  if (user && user.status === "blocked") {
+    await sendTextMessage(from, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
+    return;
+  }
+
+  if (user && user.status === "active") {
+    // Returning user - show authentication options
+    session.step = "auth_menu";
+    await sendAuthMenu(from);
+  } else {
+    // New user or opted out - start registration
     session.step = "optin";
-    await sendOptIn(to);
-  } 
+    await sendOptIn(from);
+  }
+}
+    // ==================== AUTHENTICATION MENU (Returning Users) ====================
+  else if (id === "enter_pin") {
+    session.step = "enter_pin";
+    await sendTextMessage(from, "Enter your 5-digit PIN:");
+  }
+  else if (id === "forgot_pin") {
+  session.step = "forgot_pin";
+  await sendTextMessage(from, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
+  // For now, we simulate OTP
+  session.otp = "67890"; // Different from registration OTP
+}
+
+else if (id === "opt_out") {
+  session.step = "opt_out_confirmation";
+  await sendTextMessage(from, "You are about to OPT OUT of Emergency Loan Services.\n\nDo you want to proceed? (Yes/No)");
+}
   else if (id === "optin_yes") {
     session.step = "tc";
     await sendTerms(to);
