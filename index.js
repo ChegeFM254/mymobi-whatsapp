@@ -201,6 +201,44 @@ async function triggerOTPAndShowEnterOTPScreen(to, session) {
     await sendTextMessage(to, "A 5-digit OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
 }
 
+async function sendEnterNewPIN(to) {
+    await sendTextMessage(to, "Enter your new 5-digit PIN:");
+}
+
+async function sendConfirmNewPIN(to) {
+    await sendTextMessage(to, "Confirm your new 5-digit PIN:");
+}
+
+async function sendRegistrationComplete(to) {
+    await sendTextMessage(to, "🎉 Registration Complete!\n\nYour account has been successfully set up.");
+
+    setTimeout(async () => {
+        await sendMainMenu(to);
+    }, 1500);
+}
+
+async function sendMainMenu(to) {
+    const payload = {
+        messaging_product: "whatsapp",
+        to: to,
+        type: "interactive",
+        interactive: {
+            type: "button",
+            body: { text: "What would you like to do?" },
+            action: {
+                buttons: [
+                    { type: "reply", reply: { id: "emergency_loan", title: "Emergency Loan" } },
+                    { type: "reply", reply: { id: "get_payslip", title: "Get Payslip" } },
+                    { type: "reply", reply: { id: "back", title: "Back" } },
+                    { type: "reply", reply: { id: "home", title: "Home" } },
+                    { type: "reply", reply: { id: "logout", title: "Logout" } }
+                ]
+            }
+        }
+    };
+    await sendMessage(to, payload);
+}
+
 async function sendSuccess(to) {
   await sendTextMessage(to, "✅ Registration Data Received\n\nThank you. Your details have been received and are being processed. You will be notified of the outcome shortly.");
 
