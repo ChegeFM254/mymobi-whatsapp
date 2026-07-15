@@ -19,12 +19,14 @@ function resetTimeout(from) {
     clearTimeout(userSessions[from].timeoutId);
   }
 
-  userSessions[from].timeoutId = setTimeout(async () => {
-    // Send timeout message (optional - you can remove this line if you want it completely silent)
-    await sendTextMessage(from, "⏰ Your session has timed out due to inactivity.");
-
-    // Just delete the session — do NOT resend the Welcome page
+  userSessions[from].timeoutId = setTimeout(() => {
+    // Delete the session first (more reliable)
     delete userSessions[from];
+
+    // Then send the timeout message (non-blocking)
+    sendTextMessage(from, "⏰ Your session has timed out due to inactivity.").catch(() => {
+      // Ignore errors when sending timeout message
+    });
   }, 60000); // 60 seconds
 }
 
