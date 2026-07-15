@@ -44,19 +44,23 @@ app.post('/webhook', async (req, res) => {
     if (!message) return res.sendStatus(200);
 
     const from = message.from;
-    if (!userSessions[from]) userSessions[from] = { step: 'welcome' };
-
-    resetTimeout(from);
-
-    const session = userSessions[from];
-    const buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
     const text = message.text?.body || '';
-
     const lowerText = text.toLowerCase().trim();
     const isTriggerWord = ['hi', 'hello', 'loan', 'start'].includes(lowerText) || lowerText.includes('531');
 
-    if (isTriggerWord && (session.step === 'welcome' || !session.step)) {
+    // Create session only if it doesn't exist
+    if (!userSessions[from]) {
+      userSessions[from] = { step: 'welcome', isNewSession: true };
+    }
+
+    resetTimeout(from);
+    const session = userSessions[from];
+    const buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
+
+    // Only show Welcome page once per new session
+    if (isTriggerWord && session.step === 'welcome' && session.isNewSession) {
       await sendWelcome(from);
+      session.isNewSession = false;     // Prevent it from showing again
       return;
     }
 
@@ -70,7 +74,6 @@ app.post('/webhook', async (req, res) => {
   }
   res.sendStatus(200);
 });
-
 // ==================== SCREENS ====================
 
 async function sendWelcome(to) {
