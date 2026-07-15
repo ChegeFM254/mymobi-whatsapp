@@ -5,7 +5,7 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ACCESS_TOKEN = 'EAAOxVVXxgvUBR57Y5nezVEiL42Ln4BoqhSwMxLCcIXAHCH5MUhmfrS9X8oFnZBgEfSZBt6NL1N0eBCxrMw7A91ZBvpJg4ND4NTUKzZAIuy5CyzYHWcqwjNHswRmd3HmGggvjHRuPRJ4HTWqbhSTpSPRR8Di0OAiZB1MPSgFtTwE08ekep8nIE8uGdTKq2ewZDZD';
+const ACCESS_TOKEN = 'EAAOxVVXxgvUBR01nZBbMLrVKxZCrTQUmPeUY1lnGA4puD9ewOjogRL7RS5XAnjhrIv2Mf1RzbyTJonusScaVDHCQY6wnD3icZBKvdJhlhkC9wxy4bL2juugVy00JNwNncs2zelGrZAklDelxPngH9JTuetRLKEF8FYEnGiCh0ThTHhwQHqPZAQmGv338a7AZDZD';
 const PHONE_NUMBER_ID = '1265967949926220';
 const VERIFY_TOKEN = 'mymobi_test_123';
 
@@ -192,8 +192,7 @@ async function sendEditOptions(to) {
 }
 
 async function triggerOTPAndShowEnterOTPScreen(to, session) {
-    // Simulate OTP sending (no backend needed)
-    session.otp = "12345";           // Fixed OTP for testing
+    session.otp = "12345";
     session.otpAttempts = 0;
     session.step = "enter_otp";
 
@@ -225,7 +224,6 @@ async function sendRegistrationComplete(to) {
 }
 
 async function sendMainMenu(to) {
-    // Updated Main Menu to List - 15 July 2026
     const payload = {
         messaging_product: "whatsapp",
         to: to,
@@ -284,7 +282,6 @@ async function handleButton(to, id, session) {
     await sendWelcome(to);
   } 
   else if (id === "confirm_details") {
-    // Trigger OTP flow (simulated)
     session.otp = "12345";
     session.otpAttempts = 0;
     session.step = "enter_otp";
@@ -303,7 +300,6 @@ async function handleButton(to, id, session) {
     if (fieldName === "mobilenumber") fieldName = "Mobile Number (Mpesa)";
     await sendTextMessage(to, `Enter new ${fieldName}:`);
   }
-  // Main Menu options (after successful PIN setup)
   else if (id === "emergency_loan") {
     await sendTextMessage(to, "You selected Emergency Loan. (Feature coming soon)");
   } 
@@ -323,7 +319,6 @@ async function handleTextInput(to, text, session) {
   const cleanText = text.trim();
   const step = session.step;
 
-  // ==================== DATA COLLECTION WITH VALIDATION ====================
   if (step === "first_name") {
     if (!cleanText) {
       await sendTextMessage(to, "Please enter your First Name.");
@@ -378,7 +373,6 @@ async function handleTextInput(to, text, session) {
     return;
   }
 
-  // ==================== EDIT FLOW ====================
   if (step.startsWith("edit_")) {
     if (!cleanText) {
       await sendTextMessage(to, "Please enter a valid value.");
@@ -396,7 +390,6 @@ async function handleTextInput(to, text, session) {
     return;
   }
 
-  // ==================== OTP & PIN HANDLING ====================
   if (step === "enter_otp") {
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
@@ -420,34 +413,31 @@ async function handleTextInput(to, text, session) {
   }
 
   if (step === "enter_new_pin") {
-    const cleanText = text.trim();
-
     if (!/^\d{5}$/.test(cleanText)) {
-        await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
-        return;
+      await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+      return;
     }
 
-    // New rule: PIN cannot be the same as OTP
     if (cleanText === session.otp) {
-        await sendTextMessage(to, "Your new PIN cannot be the same as the OTP you just entered. Please choose a different 5-digit PIN.");
-        return;
+      await sendTextMessage(to, "Your new PIN cannot be the same as the OTP. Please choose a different 5-digit PIN.");
+      return;
     }
 
     session.newPin = cleanText;
     session.step = "confirm_new_pin";
     await sendConfirmNewPIN(to);
     return;
-}
+  }
 
   if (step === "confirm_new_pin") {
     if (cleanText === session.newPin) {
-        await sendRegistrationComplete(to);
+      await sendRegistrationComplete(to);
     } else {
-        await sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
-        session.step = "enter_new_pin";
+      await sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
+      session.step = "enter_new_pin";
     }
     return;
-}
+  }
 }
 
 async function sendTextMessage(to, text) {
@@ -468,39 +458,6 @@ async function sendMessage(to, payload) {
   } catch (err) {
     console.error("Send failed:", err.response?.data || err.message);
   }
-}
-
-// ==================== NEW: OTP & PIN HANDLING ====================
-
-async function triggerOTPAndShowEnterOTPScreen(to, session) {
-    // TODO: Call your backend API to verify data and send OTP
-    session.otp = "12345";           // Replace this with real OTP from backend
-    session.otpAttempts = 0;
-    session.step = "enter_otp";
-
-    await sendTextMessage(to, "A 5-digit OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
-}
-
-async function sendEnterNewPIN(to) {
-    await sendTextMessage(to, "Enter your new 5-digit PIN:");
-}
-
-async function sendConfirmNewPIN(to) {
-    await sendTextMessage(to, "Confirm your new 5-digit PIN:");
-}
-
-async function sendRegistrationComplete(to) {
-    await sendTextMessage(to, "🎉 Registration Complete!\n\nYour account has been successfully set up.");
-
-    // Clear sensitive data from session after successful registration
-    if (userSessions[to]) {
-        delete userSessions[to].otp;
-        delete userSessions[to].newPin;
-    }
-
-    setTimeout(async () => {
-        await sendMainMenu(to);
-    }, 1500);
 }
 
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
