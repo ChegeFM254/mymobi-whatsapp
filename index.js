@@ -319,9 +319,10 @@ async function handleTextInput(to, text, session) {
   const cleanText = text.trim();
   const step = session.step;
 
+  // ==================== STRICT KYC INPUT VALIDATION ====================
   if (step === "first_name") {
     if (!cleanText) {
-      await sendTextMessage(to, "Please enter your First Name.");
+      await sendTextMessage(to, "Please enter your First Name to continue.");
       return;
     }
     session.firstName = cleanText;
@@ -332,7 +333,7 @@ async function handleTextInput(to, text, session) {
 
   if (step === "last_name") {
     if (!cleanText) {
-      await sendTextMessage(to, "Please enter your Last Name.");
+      await sendTextMessage(to, "Please enter your Last Name to continue.");
       return;
     }
     session.lastName = cleanText;
@@ -343,7 +344,7 @@ async function handleTextInput(to, text, session) {
 
   if (step === "upn") {
     if (!cleanText) {
-      await sendTextMessage(to, "Please enter your UPN.");
+      await sendTextMessage(to, "Please enter your UPN to continue.");
       return;
     }
     session.upn = cleanText;
@@ -354,7 +355,7 @@ async function handleTextInput(to, text, session) {
 
   if (step === "national_id") {
     if (!cleanText) {
-      await sendTextMessage(to, "Please enter your National ID Number.");
+      await sendTextMessage(to, "Please enter your National ID Number to continue.");
       return;
     }
     session.nationalId = cleanText;
@@ -365,7 +366,7 @@ async function handleTextInput(to, text, session) {
 
   if (step === "mobile_number") {
     if (!cleanText) {
-      await sendTextMessage(to, "Please enter your Mobile Number (Mpesa).");
+      await sendTextMessage(to, "Please enter your Mobile Number (Mpesa) to continue.");
       return;
     }
     session.mobileNumber = cleanText;
@@ -373,6 +374,7 @@ async function handleTextInput(to, text, session) {
     return;
   }
 
+  // ==================== EDIT FLOW ====================
   if (step.startsWith("edit_")) {
     if (!cleanText) {
       await sendTextMessage(to, "Please enter a valid value.");
@@ -390,6 +392,7 @@ async function handleTextInput(to, text, session) {
     return;
   }
 
+  // ==================== OTP & PIN HANDLING ====================
   if (step === "enter_otp") {
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
