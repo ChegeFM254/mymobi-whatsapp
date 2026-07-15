@@ -225,16 +225,22 @@ async function sendMainMenu(to) {
         to: to,
         type: "interactive",
         interactive: {
-            type: "button",
+            type: "list",
+            header: { type: "text", text: "Main Menu" },
             body: { text: "What would you like to do?" },
+            footer: { text: "MyMobi" },
             action: {
-                buttons: [
-                    { type: "reply", reply: { id: "emergency_loan", title: "Emergency Loan" } },
-                    { type: "reply", reply: { id: "get_payslip", title: "Get Payslip" } },
-                    { type: "reply", reply: { id: "back", title: "Back" } },
-                    { type: "reply", reply: { id: "home", title: "Home" } },
-                    { type: "reply", reply: { id: "logout", title: "Logout" } }
-                ]
+                button: "Select Option",
+                sections: [{
+                    title: "Options",
+                    rows: [
+                        { id: "emergency_loan", title: "Emergency Loan", description: "Apply for emergency loan" },
+                        { id: "get_payslip", title: "Get Payslip", description: "Download your payslip" },
+                        { id: "back", title: "Back", description: "Go back" },
+                        { id: "home", title: "Home", description: "Return to home" },
+                        { id: "logout", title: "Logout", description: "Log out of the app" }
+                    ]
+                }]
             }
         }
     };
