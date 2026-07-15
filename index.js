@@ -47,20 +47,20 @@ app.post('/webhook', async (req, res) => {
     const text = message.text?.body || '';
     const lowerText = text.toLowerCase().trim();
     const isTriggerWord = ['hi', 'hello', 'loan', 'start'].includes(lowerText) || lowerText.includes('531');
+    const buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
 
-    // Create session only if it doesn't exist
+    // Create new session if it doesn't exist
     if (!userSessions[from]) {
       userSessions[from] = { step: 'welcome', isNewSession: true };
     }
 
     resetTimeout(from);
     const session = userSessions[from];
-    const buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
 
-    // Only show Welcome page once per new session
-    if (isTriggerWord && session.step === 'welcome' && session.isNewSession) {
+    // Only show Welcome page once per fresh session
+    if (isTriggerWord && session.step === 'welcome' && session.isNewSession === true) {
       await sendWelcome(from);
-      session.isNewSession = false;     // Prevent it from showing again
+      session.isNewSession = false;   // Prevent it from showing again
       return;
     }
 
