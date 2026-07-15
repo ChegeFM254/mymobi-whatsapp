@@ -237,8 +237,8 @@ async function sendConfirmNewPIN(to) {
     await sendTextMessage(to, "Please re-enter your new 5-digit PIN to confirm.");
 }
 
-async function sendRegistrationComplete(to) {
-    // Save the user into registeredUsers (if they provided a mobile number)
+async function sendRegistrationComplete(to, session) {
+    // Save the user into registeredUsers
     if (session.mobileNumber && session.newPin) {
         registeredUsers[to] = {
             mobileNumber: session.mobileNumber,
@@ -511,7 +511,7 @@ async function handleTextInput(to, text, session) {
 
   if (step === "confirm_new_pin") {
     if (cleanText === session.newPin) {
-      await sendRegistrationComplete(to);
+      await sendRegistrationComplete(to, session);
     } else {
       await sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
       session.step = "enter_new_pin";
