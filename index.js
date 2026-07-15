@@ -211,8 +211,11 @@ async function sendConfirmNewPIN(to) {
 async function sendRegistrationComplete(to) {
     await sendTextMessage(to, "🎉 Registration Complete!\n\nYour account has been successfully set up.");
 
+    // Show main menu after 1.5 seconds
     setTimeout(async () => {
         await sendMainMenu(to);
+        // We can optionally delete the session here if you want a fresh session
+        // delete userSessions[to];
     }, 1500);
 }
 
@@ -393,8 +396,9 @@ async function handleTextInput(to, text, session) {
 
   if (step === "confirm_new_pin") {
     if (text.trim() === session.newPin) {
-      await sendRegistrationComplete(to);
-      delete userSessions[to];
+  await sendRegistrationComplete(to);
+  // Do NOT delete session here — let sendRegistrationComplete handle the menu
+}
     } else {
       await sendTextMessage(to, "PINs do not match. Please enter your new 5-digit PIN again:");
       session.step = "enter_new_pin";
