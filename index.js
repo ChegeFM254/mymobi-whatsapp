@@ -201,22 +201,27 @@ async function triggerOTPAndShowEnterOTPScreen(to, session) {
 }
 
 async function sendEnterNewPIN(to) {
-    await sendTextMessage(to, "Enter your new 5-digit PIN:");
+    await sendTextMessage(to, "Create a new 5-digit PIN for your account.\n\nDo not share this PIN with anyone.");
 }
 
 async function sendConfirmNewPIN(to) {
-    await sendTextMessage(to, "Confirm your new 5-digit PIN:");
+    await sendTextMessage(to, "Please re-enter your new 5-digit PIN to confirm.");
 }
 
 async function sendRegistrationComplete(to) {
-    await sendTextMessage(to, "🎉 Registration Complete!\n\nYour account has been successfully set up.");
+    await sendTextMessage(to, 
+        "🎉 Registration Complete!\n\n" +
+        "Your account has been successfully set up.\n\n" +
+        "🔒 Security Notice:\n" +
+        "• Your PIN is now active\n" +
+        "• Do not share this PIN with anyone\n" +
+        "• For your protection, we strongly recommend deleting this chat or the messages containing your PIN\n" +
+        "• You can change your PIN later from the app settings"
+    );
 
-    // Show main menu after 1.5 seconds
     setTimeout(async () => {
         await sendMainMenu(to);
-        // We can optionally delete the session here if you want a fresh session
-        // delete userSessions[to];
-    }, 1500);
+    }, 2000);
 }
 
 async function sendMainMenu(to) {
@@ -436,13 +441,13 @@ async function handleTextInput(to, text, session) {
 
   if (step === "confirm_new_pin") {
     if (cleanText === session.newPin) {
-      await sendRegistrationComplete(to);
+        await sendRegistrationComplete(to);
     } else {
-      await sendTextMessage(to, "PINs do not match. Please enter your new 5-digit PIN again:");
-      session.step = "enter_new_pin";
+        await sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
+        session.step = "enter_new_pin";
     }
     return;
-  }
+}
 }
 
 async function sendTextMessage(to, text) {
