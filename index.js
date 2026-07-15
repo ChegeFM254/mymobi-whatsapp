@@ -268,14 +268,14 @@ async function handleButton(to, id, session) {
   else if (id === "decline_tc") {
     await sendWelcome(to);
   } 
-  } else if (id === "confirm_details") {
-    // Trigger OTP flow (simulated for now)
+  else if (id === "confirm_details") {
+    // Trigger OTP flow (simulated)
     session.otp = "12345";
     session.otpAttempts = 0;
     session.step = "enter_otp";
 
     await sendTextMessage(to, "A 5-digit OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
-}
+  } 
   else if (id === "edit_details") {
     await sendEditOptions(to);
   } 
@@ -288,6 +288,21 @@ async function handleButton(to, id, session) {
     if (fieldName === "mobilenumber") fieldName = "Mobile Number (Mpesa)";
     await sendTextMessage(to, `Enter new ${fieldName}:`);
   }
+  // Main Menu options (after successful PIN setup)
+  else if (id === "emergency_loan") {
+    await sendTextMessage(to, "You selected Emergency Loan. (Feature coming soon)");
+  } 
+  else if (id === "get_payslip") {
+    await sendTextMessage(to, "You selected Get Payslip. (Feature coming soon)");
+  } 
+  else if (id === "back" || id === "home") {
+    await sendWelcome(to);
+  } 
+  else if (id === "logout") {
+    await sendTextMessage(to, "You have been logged out.");
+    delete userSessions[to];
+  }
+}
 
 async function handleTextInput(to, text, session) {
   const cleanText = text.trim();
