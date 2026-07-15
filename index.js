@@ -238,6 +238,17 @@ async function sendConfirmNewPIN(to) {
 }
 
 async function sendRegistrationComplete(to) {
+    // Save the user into registeredUsers (if they provided a mobile number)
+    if (session.mobileNumber && session.newPin) {
+        registeredUsers[to] = {
+            mobileNumber: session.mobileNumber,
+            pin: session.newPin,
+            status: "active",
+            failedPinAttempts: 0
+        };
+        console.log(`User registered: ${session.mobileNumber}`);
+    }
+
     await sendTextMessage(to, 
         "🎉 Registration Complete!\n\n" +
         "Your account has been successfully set up.\n\n" +
@@ -247,6 +258,12 @@ async function sendRegistrationComplete(to) {
         "• For your protection, we strongly recommend deleting this chat or the messages containing your PIN\n" +
         "• You can change your PIN later from the app settings"
     );
+
+    // Clear sensitive data
+    if (userSessions[to]) {
+        delete userSessions[to].otp;
+        delete userSessions[to].newPin;
+    }
 
     setTimeout(async () => {
         await sendMainMenu(to);
