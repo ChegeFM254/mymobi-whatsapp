@@ -331,7 +331,7 @@ async function handleButton(to, id, session) {
     // ==================== AUTHENTICATION MENU (Returning Users) ====================
   else if (id === "enter_pin") {
     session.step = "enter_pin";
-    await sendTextMessage(to, "Enter your 5-digit PIN:");
+    await sendTextMessage(to, "Enter your PIN:");
   }
   else if (id === "forgot_pin") {
   session.step = "forgot_pin";
@@ -363,7 +363,7 @@ else if (id === "opt_out") {
     session.otpAttempts = 0;
     session.step = "enter_otp";
 
-    await sendTextMessage(to, "A 5-digit OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
+    await sendTextMessage(to, "An OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
   } 
   else if (id === "edit_details") {
     await sendEditOptions(to);
@@ -468,7 +468,7 @@ else if (step === "mobile_number") {
   // ==================== OTP & PIN HANDLING ====================
   if (step === "enter_otp") {
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
+      await sendTextMessage(to, "Invalid OTP. Please enter a correct number.");
       return;
     }
 
@@ -557,7 +557,7 @@ else if (step === "mobile_number") {
     const verificationCode = "67890";
 
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid code. Please enter a 5-digit verification code.");
+      await sendTextMessage(to, "Invalid code. Please enter a correct verification code.");
       return;
     }
 
@@ -570,7 +570,7 @@ else if (step === "mobile_number") {
       if (session.verificationAttempts >= 3) {
         await sendTextMessage(to, "Too many incorrect attempts. Please start again.");
         session.step = "enter_pin";
-        await sendTextMessage(to, "Enter your 5-digit PIN:");
+        await sendTextMessage(to, "Enter your registered PIN:");
       } else {
         const attemptsLeft = 3 - session.verificationAttempts;
         await sendTextMessage(to, `Incorrect code. You have ${attemptsLeft} attempt(s) remaining.`);
@@ -582,7 +582,7 @@ else if (step === "mobile_number") {
   // ==================== FORGOT PIN ====================
   if (step === "forgot_pin") {
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit OTP.");
+      await sendTextMessage(to, "Invalid OTP. Please enter a correct OTP.");
       return;
     }
 
