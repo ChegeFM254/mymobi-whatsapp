@@ -393,58 +393,69 @@ async function handleTextInput(to, text, session) {
   const cleanText = text.trim();
   const step = session.step;
 
-  // ==================== KYC DATA COLLECTION (Fixed Version) ====================
-if (step === "first_name") {
-    if (!cleanText) {
+  // =====================================================
+  // KYC DATA COLLECTION (with strict guard)
+  // =====================================================
+  if (["first_name", "last_name", "upn", "national_id", "mobile_number"].includes(step)) {
+
+    if (step === "first_name") {
+      if (!cleanText) {
         await sendTextMessage(to, "Please enter your First Name.");
         return;
+      }
+      session.firstName = cleanText;
+      session.step = "last_name";
+      await sendTextMessage(to, "Enter your Last Name");
+      return;
     }
-    session.firstName = cleanText;
-    session.step = "last_name";
-    await sendTextMessage(to, "Enter your Last Name");
-    return;
-} 
-else if (step === "last_name") {
-    if (!cleanText) {
+
+    if (step === "last_name") {
+      if (!cleanText) {
         await sendTextMessage(to, "Please enter your Last Name.");
         return;
+      }
+      session.lastName = cleanText;
+      session.step = "upn";
+      await sendTextMessage(to, "Enter UPN");
+      return;
     }
-    session.lastName = cleanText;
-    session.step = "upn";
-    await sendTextMessage(to, "Enter UPN");
-    return;
-} 
-else if (step === "upn") {
-    if (!cleanText) {
+
+    if (step === "upn") {
+      if (!cleanText) {
         await sendTextMessage(to, "Please enter your UPN.");
         return;
+      }
+      session.upn = cleanText;
+      session.step = "national_id";
+      await sendTextMessage(to, "Enter National ID Number");
+      return;
     }
-    session.upn = cleanText;
-    session.step = "national_id";
-    await sendTextMessage(to, "Enter National ID Number");
-    return;
-} 
-else if (step === "national_id") {
-    if (!cleanText) {
+
+    if (step === "national_id") {
+      if (!cleanText) {
         await sendTextMessage(to, "Please enter your National ID Number.");
         return;
+      }
+      session.nationalId = cleanText;
+      session.step = "mobile_number";
+      await sendTextMessage(to, "Enter Mobile Number (Mpesa)");
+      return;
     }
-    session.nationalId = cleanText;
-    session.step = "mobile_number";
-    await sendTextMessage(to, "Enter Mobile Number (Mpesa)");
-    return;
-} 
-else if (step === "mobile_number") {
-    if (!cleanText) {
+
+    if (step === "mobile_number") {
+      if (!cleanText) {
         await sendTextMessage(to, "Please enter your Mobile Number (Mpesa).");
         return;
+      }
+      session.mobileNumber = cleanText;
+      await sendConfirmation(to, session);
+      return;
     }
-    session.mobileNumber = cleanText;
-    await sendConfirmation(to, session);
-    return;
-}
+  }
 
-  // ==================== EDIT FLOW ====================
+  // =====================================================
+  // EDIT FLOW
+  // =====================================================
   if (step.startsWith("edit_")) {
     if (!cleanText) {
       await sendTextMessage(to, "Please enter a valid value.");
@@ -462,10 +473,12 @@ else if (step === "mobile_number") {
     return;
   }
 
-  // ==================== OTP & PIN HANDLING ====================
+  // =====================================================
+  // REGISTRATION: OTP + PIN SETUP
+  // =====================================================
   if (step === "enter_otp") {
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid OTP. Please enter a correct number.");
+      await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
       return;
     }
 
@@ -476,10 +489,10 @@ else if (step === "mobile_number") {
       session.otpAttempts = (session.otpAttempts || 0) + 1;
 
       if (session.otpAttempts >= 3) {
-        await sendTextMessage(to, "PIN Deactivated. Please try again after 30 minutes.");
+        await sendTextMessage(to, "Too many incorrect attempts. Your PIN has been deactivated. Please try again after 30 minutes.");
         delete userSessions[to];
       } else {
-        await sendTextMessage(to, `Incorrect PIN. You have ${3 - session.otpAttempts} attempt(s) remaining.`);
+        await sendTextMessage(to, `Incorrect OTP. You have ${3 - session.otpAttempts} attempt(s) remaining.`);
       }
     }
     return;
@@ -487,7 +500,7 @@ else if (step === "mobile_number") {
 
   if (step === "enter_new_pin") {
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid PIN. Please enter correct PIN.");
+      await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
       return;
     }
 
@@ -506,88 +519,61 @@ else if (step === "mobile_number") {
     if (cleanText === session.newPin) {
       await sendRegistrationComplete(to, session);
     } else {
-      await sendTextMessage(to, "The PINs do not match. Please enter your new PIN again:");
+      await sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
       session.step = "enter_new_pin";
     }
     return;
   }
 
-  // ==================== ENTER PIN + VERIFICATION CODE ====================
-if (step === "enter_pin") {
+  // =====================================================
+  // RETURNING USER: ENTER PIN + VERIFICATION CODE
+  // =====================================================
+  if (step === "enter_pin") {
     if (!cleanText) {
-        await sendTextMessage(to, "Please enter your 5-digit PIN.");
-        return;
+      await sendTextMessage(to, "Please enter your 5-digit PIN.");
+      return;
     }
 
     if (!/^\d{5}$/.test(cleanText)) {
-        await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
-        return;
+      await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+      return;
     }
 
     const user = registeredUsers[to];
 
     if (!user) {
-        await sendTextMessage(to, "User not found. Please register first.");
-        return;
+      await sendTextMessage(to, "User not found. Please register first.");
+      return;
     }
 
     if (user.status === "blocked") {
-        await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
-        return;
+      await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
+      return;
     }
 
     if (cleanText === user.pin) {
-        // ✅ Correct PIN - Move to Verification Code
-        user.failedPinAttempts = 0;
-        session.step = "enter_verification_code";
-        await sendTextMessage(to, "Enter Verification Code:");
+      user.failedPinAttempts = 0;
+      session.step = "enter_verification_code";
+      await sendTextMessage(to, "Enter Verification Code:");
     } else {
-        // Wrong PIN
-        user.failedPinAttempts = (user.failedPinAttempts || 0) + 1;
+      user.failedPinAttempts = (user.failedPinAttempts || 0) + 1;
 
-        if (user.failedPinAttempts >= 3) {
-            user.status = "blocked";
-            await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
-        } else {
-            const attemptsLeft = 3 - user.failedPinAttempts;
-            await sendTextMessage(to, `Incorrect PIN. You have ${attemptsLeft} attempt(s) remaining.`);
-        }
+      if (user.failedPinAttempts >= 3) {
+        user.status = "blocked";
+        await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
+      } else {
+        const attemptsLeft = 3 - user.failedPinAttempts;
+        await sendTextMessage(to, `Incorrect PIN. You have ${attemptsLeft} attempt(s) remaining.`);
+      }
     }
     return;
-}
+  }
 
-if (step === "enter_verification_code") {
-    const verificationCode = "67890";
-
-    if (!/^\d{5}$/.test(cleanText)) {
-        await sendTextMessage(to, "Invalid code. Please enter a 5-digit verification code.");
-        return;
-    }
-
-    if (cleanText === verificationCode) {
-        await sendTextMessage(to, "Verification successful!");
-        await sendMainMenu(to);
-    } else {
-        session.verificationAttempts = (session.verificationAttempts || 0) + 1;
-
-        if (session.verificationAttempts >= 3) {
-            await sendTextMessage(to, "Too many incorrect attempts. Please start again.");
-            session.step = "enter_pin";
-            await sendTextMessage(to, "Enter your 5-digit PIN:");
-        } else {
-            const attemptsLeft = 3 - session.verificationAttempts;
-            await sendTextMessage(to, `Incorrect code. You have ${attemptsLeft} attempt(s) remaining.`);
-        }
-    }
-    return;
-}
-
-  // ==================== ENTER VERIFICATION CODE ====================
   if (step === "enter_verification_code") {
     const verificationCode = "67890";
 
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid code. Please enter a correct verification code.");
+      await sendTextMessage(to, "Invalid code. Please enter a 5-digit verification code.");
       return;
     }
 
@@ -600,7 +586,7 @@ if (step === "enter_verification_code") {
       if (session.verificationAttempts >= 3) {
         await sendTextMessage(to, "Too many incorrect attempts. Please start again.");
         session.step = "enter_pin";
-        await sendTextMessage(to, "Enter your registered PIN:");
+        await sendTextMessage(to, "Enter your 5-digit PIN:");
       } else {
         const attemptsLeft = 3 - session.verificationAttempts;
         await sendTextMessage(to, `Incorrect code. You have ${attemptsLeft} attempt(s) remaining.`);
@@ -609,10 +595,12 @@ if (step === "enter_verification_code") {
     return;
   }
 
-  // ==================== FORGOT PIN ====================
+  // =====================================================
+  // FORGOT PIN
+  // =====================================================
   if (step === "forgot_pin") {
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid OTP. Please enter a correct OTP.");
+      await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit OTP.");
       return;
     }
 
@@ -625,7 +613,9 @@ if (step === "enter_verification_code") {
     return;
   }
 
-  // ==================== OPT OUT ====================
+  // =====================================================
+  // OPT OUT
+  // =====================================================
   if (step === "opt_out_confirmation") {
     const response = cleanText.toLowerCase();
 
