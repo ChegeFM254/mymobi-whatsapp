@@ -515,7 +515,6 @@ else if (step === "mobile_number") {
     return;
   }
 
-  // ==================== ENTER PIN (Returning Users) ====================
   // ==================== ENTER PIN (Returning Users) - Fixed ====================
 if (step === "enter_pin") {
     // Ignore empty input (don't reject immediately)
