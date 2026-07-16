@@ -516,41 +516,49 @@ else if (step === "mobile_number") {
   }
 
   // ==================== ENTER PIN (Returning Users) ====================
-  if (step === "enter_pin") {
+  // ==================== ENTER PIN (Returning Users) - Fixed ====================
+if (step === "enter_pin") {
+    // Ignore empty input (don't reject immediately)
+    if (!cleanText) {
+        return;   // Do nothing if no text was sent
+    }
+
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
-      return;
+        await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+        return;
     }
 
     const user = registeredUsers[to];
 
     if (!user) {
-      await sendTextMessage(to, "User not found. Please register first.");
-      return;
+        await sendTextMessage(to, "User not found. Please register first.");
+        return;
     }
 
     if (user.status === "blocked") {
-      await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
-      return;
+        await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
+        return;
     }
 
     if (cleanText === user.pin) {
-      user.failedPinAttempts = 0;
-      session.step = "enter_verification_code";
-      await sendTextMessage(to, "Enter Verification Code:");
+        // Correct PIN
+        user.failedPinAttempts = 0;
+        session.step = "enter_verification_code";
+        await sendTextMessage(to, "Enter Verification Code:");
     } else {
-      user.failedPinAttempts = (user.failedPinAttempts || 0) + 1;
+        // Wrong PIN
+        user.failedPinAttempts = (user.failedPinAttempts || 0) + 1;
 
-      if (user.failedPinAttempts >= 3) {
-        user.status = "blocked";
-        await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
-      } else {
-        const attemptsLeft = 3 - user.failedPinAttempts;
-        await sendTextMessage(to, `Incorrect PIN. You have ${attemptsLeft} attempt(s) remaining.`);
-      }
+        if (user.failedPinAttempts >= 3) {
+            user.status = "blocked";
+            await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
+        } else {
+            const attemptsLeft = 3 - user.failedPinAttempts;
+            await sendTextMessage(to, `Incorrect PIN. You have ${attemptsLeft} attempt(s) remaining.`);
+        }
     }
     return;
-  }
+}
 
   // ==================== ENTER VERIFICATION CODE ====================
   if (step === "enter_verification_code") {
