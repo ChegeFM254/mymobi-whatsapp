@@ -257,7 +257,8 @@ async function sendRegistrationComplete(to, session) {
         "• For your protection, we strongly recommend deleting this chat or the messages containing your PIN\n" +
         "• You can change your PIN later from the app settings"
     );
-
+  console.log("=== DEBUG: About to send Main Menu ===");
+  
   await sendMainMenu(to);
 
     if (userSessions[to]) {
