@@ -226,7 +226,7 @@ async function triggerOTPAndShowEnterOTPScreen(to, session) {
     session.otpAttempts = 0;
     session.step = "enter_otp";
 
-    await sendTextMessage(to, "A 5-digit OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
+    await sendTextMessage(to, "A OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
 }
 
 async function sendEnterNewPIN(to) {
@@ -490,7 +490,7 @@ else if (step === "mobile_number") {
 
   if (step === "enter_new_pin") {
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+      await sendTextMessage(to, "Invalid PIN. Please enter correct PIN.");
       return;
     }
 
@@ -509,7 +509,7 @@ else if (step === "mobile_number") {
     if (cleanText === session.newPin) {
       await sendRegistrationComplete(to, session);
     } else {
-      await sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
+      await sendTextMessage(to, "The PINs do not match. Please enter your new PIN again:");
       session.step = "enter_new_pin";
     }
     return;
