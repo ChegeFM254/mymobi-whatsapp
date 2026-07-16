@@ -515,11 +515,12 @@ else if (step === "mobile_number") {
     return;
   }
 
-  // ==================== ENTER PIN (Returning Users) - Fixed ====================
+  // ==================== ENTER PIN (Returning Users) - Fixed like KYC ====================
 if (step === "enter_pin") {
-    // Ignore empty input (don't reject immediately)
+    // Only process if user actually sent something
     if (!cleanText) {
-        return;   // Do nothing if no text was sent
+        await sendTextMessage(to, "Please enter your 5-digit PIN.");
+        return;
     }
 
     if (!/^\d{5}$/.test(cleanText)) {
