@@ -5,7 +5,7 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ACCESS_TOKEN = 'EAAOxVVXxgvUBR7svwHyWiv43GMt7HohlucbAdrvo3QWhqOh6lG1WPPZBi4kBnapbE5UK7IPDUXDgMXGshZBXvyOQBoZBHdRc6ZAZChqvx1RvC11IbdamGNPQSCV1c5w2OUDKxbyaP1Xwb21qqsXRWMu4Fj0kSiaVr39r4aC5Kz8t0vOtWoxRbZCqGnvY3iggZDZD';
+const ACCESS_TOKEN = 'EAAOxVVXxgvUBR7ZAnegjAq5UZCfeYqEkhevYGOEhXhLjkV6hIFdyB7uLI7mrAyvHHZBdXBEfZBnbwOLAfqJK2zryzGKKGNvtfpGLFi3QO054qhkVo8f9mYP4KIG5a0ZALX6ZABltcWEJQSsHE7Lc307OZCyNAARzQ0IdcLpy30FrpRI6OpFeZBFZCfHFkSIhOTHpQDgZDZD';
 const PHONE_NUMBER_ID = '1265967949926220';
 const VERIFY_TOKEN = 'mymobi_test_123';
 
@@ -518,6 +518,126 @@ async function handleTextInput(to, text, session) {
     }
     return;
   }
+}
+// ==================== ENTER PIN (Returning Users) ====================
+if (step === "enter_pin") {
+    if (!/^\d{5}$/.test(cleanText)) {
+      await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+      return;
+    }
+
+    const user = registeredUsers[to];
+
+    if (!user) {
+      await sendTextMessage(to, "User not found. Please register first.");
+      return;
+    }
+
+    if (user.status === "blocked") {
+      await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
+      return;
+    }
+
+    if (cleanText === user.pin) {
+      // Correct PIN
+      user.failedPinAttempts = 0; // Reset attempts
+      session.step = "enter_verification_code";
+      await sendTextMessage(to, "Enter Verification Code:");
+    } else {
+      // Wrong PIN
+      user.failedPinAttempts = (user.failedPinAttempts || 0) + 1;
+
+      if (user.failedPinAttempts >= 3) {
+        user.status = "blocked";
+        await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
+      } else {
+        const attemptsLeft = 3 - user.failedPinAttempts;
+        await sendTextMessage(to, `Incorrect PIN. You have ${attemptsLeft} attempt(s) remaining.`);
+      }
+    }
+    return;
+}
+
+// ==================== ENTER VERIFICATION CODE ====================
+if (step === "enter_verification_code") {
+    // Simulated verification code (different from OTP)
+    const verificationCode = "67890";
+
+    if (!/^\d{5}$/.test(cleanText)) {
+      await sendTextMessage(to, "Invalid code. Please enter a 5-digit verification code.");
+      return;
+    }
+
+    if (cleanText === verificationCode) {
+      // Correct verification code
+      await sendTextMessage(to, "Verification successful!");
+      await sendMainMenu(to);
+    } else {
+      // Wrong verification code
+      session.verificationAttempts = (session.verificationAttempts || 0) + 1;
+
+      if (session.verificationAttempts >= 3) {
+        await sendTextMessage(to, "Too many incorrect attempts. Please start again.");
+        session.step = "enter_pin";
+        await sendTextMessage(to, "Enter your 5-digit PIN:");
+      } else {
+        const attemptsLeft = 3 - session.verificationAttempts;
+        await sendTextMessage(to, `Incorrect code. You have ${attemptsLeft} attempt(s) remaining.`);
+      }
+    }
+    return;
+}
+
+// ==================== FORGOT PIN ====================
+if (step === "forgot_pin") {
+    if (!/^\d{5}$/.test(cleanText)) {
+      await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit OTP.");
+      return;
+    }
+
+    if (cleanText === session.otp) {
+      // OTP correct → start new PIN setup
+      session.step = "enter_new_pin";
+      await sendTextMessage(to, "OTP verified. Please create a new 5-digit PIN:");
+    } else {
+      await sendTextMessage(to, "Incorrect OTP. Please try again.");
+    }
+    return;
+}
+
+// ==================== OPT OUT ====================
+if (step === "opt_out_confirmation") {
+    const response = cleanText.toLowerCase();
+
+    if (response === "yes" || response === "y") {
+      session.step = "opt_out_pin";
+      await sendTextMessage(to, "To confirm opt out, please enter your 5-digit PIN:");
+    } else if (response === "no" || response === "n") {
+      await sendTextMessage(to, "Opt out cancelled.");
+      await sendAuthMenu(to);
+    } else {
+      await sendTextMessage(to, "Please reply with Yes or No.");
+    }
+    return;
+}
+
+if (step === "opt_out_pin") {
+    const user = registeredUsers[to];
+
+    if (!user) {
+      await sendTextMessage(to, "User not found.");
+      return;
+    }
+
+    if (cleanText === user.pin) {
+      // Correct PIN → Opt out the user
+      user.status = "opted_out";
+      delete user.pin; // Remove PIN for security
+      await sendTextMessage(to, "You have been successfully opted out of the Emergency Loan service.");
+    } else {
+      await sendTextMessage(to, "Incorrect PIN. Opt out cancelled.");
+    }
+    return;
 }
 
 async function sendTextMessage(to, text) {
