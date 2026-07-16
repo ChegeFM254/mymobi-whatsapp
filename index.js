@@ -238,8 +238,7 @@ async function sendConfirmNewPIN(to) {
 }
 
 async function sendRegistrationComplete(to, session) {
-    // Save the user into registeredUsers
-    if (session.mobileNumber && session.newPin) {
+    if (session && session.mobileNumber && session.newPin) {
         registeredUsers[to] = {
             mobileNumber: session.mobileNumber,
             pin: session.newPin,
@@ -259,15 +258,12 @@ async function sendRegistrationComplete(to, session) {
         "• You can change your PIN later from the app settings"
     );
 
-    // Clear sensitive data
+  await sendMainMenu(to);
+
     if (userSessions[to]) {
         delete userSessions[to].otp;
         delete userSessions[to].newPin;
     }
-
-    setTimeout(async () => {
-        await sendMainMenu(to);
-    }, 2000);
 }
 
 async function sendMainMenu(to) {
