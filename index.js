@@ -515,14 +515,13 @@ else if (step === "mobile_number") {
     return;
   }
 
-  // ==================== ENTER PIN (Returning Users) ====================
+  // ==================== ENTER PIN + VERIFICATION CODE ====================
 if (step === "enter_pin") {
-    // If nothing was sent, do nothing (prevents immediate rejection)
     if (!cleanText) {
+        await sendTextMessage(to, "Please enter your 5-digit PIN.");
         return;
     }
 
-    // Only validate format if user actually sent something
     if (!/^\d{5}$/.test(cleanText)) {
         await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
         return;
@@ -541,7 +540,7 @@ if (step === "enter_pin") {
     }
 
     if (cleanText === user.pin) {
-        // Correct PIN
+        // ✅ Correct PIN - Move to Verification Code
         user.failedPinAttempts = 0;
         session.step = "enter_verification_code";
         await sendTextMessage(to, "Enter Verification Code:");
@@ -555,6 +554,32 @@ if (step === "enter_pin") {
         } else {
             const attemptsLeft = 3 - user.failedPinAttempts;
             await sendTextMessage(to, `Incorrect PIN. You have ${attemptsLeft} attempt(s) remaining.`);
+        }
+    }
+    return;
+}
+
+if (step === "enter_verification_code") {
+    const verificationCode = "67890";
+
+    if (!/^\d{5}$/.test(cleanText)) {
+        await sendTextMessage(to, "Invalid code. Please enter a 5-digit verification code.");
+        return;
+    }
+
+    if (cleanText === verificationCode) {
+        await sendTextMessage(to, "Verification successful!");
+        await sendMainMenu(to);
+    } else {
+        session.verificationAttempts = (session.verificationAttempts || 0) + 1;
+
+        if (session.verificationAttempts >= 3) {
+            await sendTextMessage(to, "Too many incorrect attempts. Please start again.");
+            session.step = "enter_pin";
+            await sendTextMessage(to, "Enter your 5-digit PIN:");
+        } else {
+            const attemptsLeft = 3 - session.verificationAttempts;
+            await sendTextMessage(to, `Incorrect code. You have ${attemptsLeft} attempt(s) remaining.`);
         }
     }
     return;
