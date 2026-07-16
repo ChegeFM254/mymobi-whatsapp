@@ -518,9 +518,9 @@ async function handleTextInput(to, text, session) {
     }
     return;
   }
-}
-// ==================== ENTER PIN (Returning Users) ====================
-if (step === "enter_pin") {
+
+  // ==================== ENTER PIN (Returning Users) ====================
+  if (step === "enter_pin") {
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
       return;
@@ -539,12 +539,10 @@ if (step === "enter_pin") {
     }
 
     if (cleanText === user.pin) {
-      // Correct PIN
-      user.failedPinAttempts = 0; // Reset attempts
+      user.failedPinAttempts = 0;
       session.step = "enter_verification_code";
       await sendTextMessage(to, "Enter Verification Code:");
     } else {
-      // Wrong PIN
       user.failedPinAttempts = (user.failedPinAttempts || 0) + 1;
 
       if (user.failedPinAttempts >= 3) {
@@ -556,11 +554,10 @@ if (step === "enter_pin") {
       }
     }
     return;
-}
+  }
 
-// ==================== ENTER VERIFICATION CODE ====================
-if (step === "enter_verification_code") {
-    // Simulated verification code (different from OTP)
+  // ==================== ENTER VERIFICATION CODE ====================
+  if (step === "enter_verification_code") {
     const verificationCode = "67890";
 
     if (!/^\d{5}$/.test(cleanText)) {
@@ -569,11 +566,9 @@ if (step === "enter_verification_code") {
     }
 
     if (cleanText === verificationCode) {
-      // Correct verification code
       await sendTextMessage(to, "Verification successful!");
       await sendMainMenu(to);
     } else {
-      // Wrong verification code
       session.verificationAttempts = (session.verificationAttempts || 0) + 1;
 
       if (session.verificationAttempts >= 3) {
@@ -586,27 +581,26 @@ if (step === "enter_verification_code") {
       }
     }
     return;
-}
+  }
 
-// ==================== FORGOT PIN ====================
-if (step === "forgot_pin") {
+  // ==================== FORGOT PIN ====================
+  if (step === "forgot_pin") {
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit OTP.");
       return;
     }
 
     if (cleanText === session.otp) {
-      // OTP correct → start new PIN setup
       session.step = "enter_new_pin";
       await sendTextMessage(to, "OTP verified. Please create a new 5-digit PIN:");
     } else {
       await sendTextMessage(to, "Incorrect OTP. Please try again.");
     }
     return;
-}
+  }
 
-// ==================== OPT OUT ====================
-if (step === "opt_out_confirmation") {
+  // ==================== OPT OUT ====================
+  if (step === "opt_out_confirmation") {
     const response = cleanText.toLowerCase();
 
     if (response === "yes" || response === "y") {
@@ -619,9 +613,9 @@ if (step === "opt_out_confirmation") {
       await sendTextMessage(to, "Please reply with Yes or No.");
     }
     return;
-}
+  }
 
-if (step === "opt_out_pin") {
+  if (step === "opt_out_pin") {
     const user = registeredUsers[to];
 
     if (!user) {
@@ -630,14 +624,14 @@ if (step === "opt_out_pin") {
     }
 
     if (cleanText === user.pin) {
-      // Correct PIN → Opt out the user
       user.status = "opted_out";
-      delete user.pin; // Remove PIN for security
+      delete user.pin;
       await sendTextMessage(to, "You have been successfully opted out of the Emergency Loan service.");
     } else {
       await sendTextMessage(to, "Incorrect PIN. Opt out cancelled.");
     }
     return;
+  }
 }
 
 async function sendTextMessage(to, text) {
