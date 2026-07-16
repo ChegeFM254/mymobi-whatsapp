@@ -310,9 +310,6 @@ async function handleButton(to, id, session) {
   if (id === "civil_servants") {
   const user = registeredUsers[to];
 
-  console.log("=== DEBUG: Is user registered? ===", !!registeredUsers[to]);
-  console.log("=== DEBUG: User data ===", registeredUsers[to]);
-
   if (user && user.status === "blocked") {
     await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
     return;
