@@ -396,60 +396,36 @@ async function handleTextInput(to, text, session) {
   const cleanText = text.trim();
   const step = session.step;
 
-  // ==================== STRICT KYC INPUT VALIDATION ====================
-  if (step === "first_name") {
-    if (!cleanText) {
-      await sendTextMessage(to, "Please enter your First Name to continue.");
-      return;
-    }
+  // ==================== KYC DATA COLLECTION (Strict - No Multiple Prompts) ====================
+if (step === "first_name") {
     session.firstName = cleanText;
     session.step = "last_name";
     await sendTextMessage(to, "Enter your Last Name");
     return;
-  }
-
-  if (step === "last_name") {
-    if (!cleanText) {
-      await sendTextMessage(to, "Please enter your Last Name to continue.");
-      return;
-    }
+} 
+else if (step === "last_name") {
     session.lastName = cleanText;
     session.step = "upn";
     await sendTextMessage(to, "Enter UPN");
     return;
-  }
-
-  if (step === "upn") {
-    if (!cleanText) {
-      await sendTextMessage(to, "Please enter your UPN to continue.");
-      return;
-    }
+} 
+else if (step === "upn") {
     session.upn = cleanText;
     session.step = "national_id";
     await sendTextMessage(to, "Enter National ID Number");
     return;
-  }
-
-  if (step === "national_id") {
-    if (!cleanText) {
-      await sendTextMessage(to, "Please enter your National ID Number to continue.");
-      return;
-    }
+} 
+else if (step === "national_id") {
     session.nationalId = cleanText;
     session.step = "mobile_number";
     await sendTextMessage(to, "Enter Mobile Number (Mpesa)");
     return;
-  }
-
-  if (step === "mobile_number") {
-    if (!cleanText) {
-      await sendTextMessage(to, "Please enter your Mobile Number (Mpesa) to continue.");
-      return;
-    }
+} 
+else if (step === "mobile_number") {
     session.mobileNumber = cleanText;
     await sendConfirmation(to, session);
     return;
-  }
+}
 
   // ==================== EDIT FLOW ====================
   if (step.startsWith("edit_")) {
