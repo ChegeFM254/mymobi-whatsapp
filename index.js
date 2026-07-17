@@ -341,7 +341,7 @@ async function sendRegistrationComplete(to, session) {
         "• For your protection, we strongly recommend deleting this chat or the messages containing your PIN\n" +
         "• You can change your PIN later from the app settings"
     );
-  await sendMainMenu(to);
+  await sendMainMenu(to, session);
 }
 
 // ==================== BUG FIX #2 (new function) ====================
@@ -370,10 +370,11 @@ async function sendPinResetComplete(to, session) {
     "✅ Your PIN has been updated successfully.\n\n" +
     "🔒 Do not share this PIN with anyone."
   );
-  await sendMainMenu(to);
+  await sendMainMenu(to, session);
 }
 
-async function sendMainMenu(to) {
+async function sendMainMenu(to, session) {
+    if (session) session.currentMenu = "civil_servants_menu";
     const payload = {
         messaging_product: "whatsapp",
         to: to,
@@ -403,7 +404,8 @@ async function sendMainMenu(to) {
 
 // ==================== EMERGENCY LOAN SCREENS ====================
 
-async function sendEmergencyLoanMenu(to) {
+async function sendEmergencyLoanMenu(to, session) {
+  if (session) session.currentMenu = "emergency_loan_menu";
   const payload = {
     messaging_product: "whatsapp",
     to: to,
@@ -430,7 +432,8 @@ async function sendEmergencyLoanMenu(to) {
   await sendMessage(to, payload);
 }
 
-async function sendLoanTenureOptions(to) {
+async function sendLoanTenureOptions(to, session) {
+  if (session) session.currentMenu = "loan_tenure_menu";
   const payload = {
     messaging_product: "whatsapp",
     to: to,
@@ -497,6 +500,22 @@ const EDIT_FIELD_LABELS = {
   edit_mobilenumber: "Mobile Number (Mpesa)"
 };
 
+
+// ==================== BUG FIX #6 ====================
+// Maps a screen's session.currentMenu identifier to the function that
+// renders the menu ONE LEVEL UP from it. "Back" looks up the user's
+// current screen here and calls the corresponding previous screen —
+// as opposed to "Home", which always jumps to Welcome regardless of
+// where the user currently is.
+//
+// To add a new navigable menu in future: have its send function set
+// session.currentMenu = "some_id", then add an entry here mapping
+// "some_id" -> the function that shows the menu it was reached from.
+const MENU_BACK_MAP = {
+  civil_servants_menu: (to, session) => sendWelcome(to),                    // Civil Servants Menu -> Welcome
+  emergency_loan_menu: (to, session) => sendMainMenu(to, session),          // Emergency Loan submenu -> Civil Servants Menu
+  loan_tenure_menu: (to, session) => sendEmergencyLoanMenu(to, session)     // Loan tenure list -> Emergency Loan submenu
+};
 
 // ==================== HANDLERS ====================
 
@@ -568,10 +587,10 @@ async function handleButton(to, id, session) {
     await sendTextMessage(to, `Enter new ${fieldName}:`);
   }
   else if (id === "emergency_loan") {
-    await sendEmergencyLoanMenu(to);
+    await sendEmergencyLoanMenu(to, session);
   }
   else if (id === "apply_loan") {
-    await sendLoanTenureOptions(to);
+    await sendLoanTenureOptions(to, session);
   }
   else if (LOAN_TENURE_OPTIONS[id]) {
     const tenure = LOAN_TENURE_OPTIONS[id];
@@ -586,7 +605,7 @@ async function handleButton(to, id, session) {
       // Defensive: shouldn't happen in normal flow, but avoids a crash
       // if a stale button is tapped after the session moved on.
       await sendTextMessage(to, "That loan application has expired. Let's start again.");
-      await sendEmergencyLoanMenu(to);
+      await sendEmergencyLoanMenu(to, session);
       return;
     }
     session.step = "enter_payroll_number";
@@ -598,12 +617,21 @@ async function handleButton(to, id, session) {
     delete session.loanAmount;
     delete session.loanBreakdown;
     await sendTextMessage(to, "Loan application declined.");
-    await sendEmergencyLoanMenu(to);
+    await sendEmergencyLoanMenu(to, session);
   }
   else if (id === "get_payslip") {
     await sendTextMessage(to, "You selected Get Payslip. (Feature coming soon)");
   }
-  else if (id === "back" || id === "home") {
+  else if (id === "back") {
+    // BUG FIX #6: "Back" and "Home" previously did the exact same thing
+    // (both jumped to Welcome). Back should return to the menu the user
+    // came FROM, not always the top-level Welcome screen. MENU_BACK_MAP
+    // looks up the previous screen based on session.currentMenu, which
+    // each navigable menu function sets on itself when it's shown.
+    const goBack = MENU_BACK_MAP[session.currentMenu] || ((t, s) => sendWelcome(t));
+    await goBack(to, session);
+  }
+  else if (id === "home") {
     await sendWelcome(to);
   }
   else if (id === "logout") {
@@ -742,7 +770,7 @@ async function handleTextInput(to, text, session) {
     delete session.loanBreakdown;
     delete session.payrollNumber;
 
-    await sendMainMenu(to);
+    await sendMainMenu(to, session);
     return;
   }
 
@@ -878,7 +906,7 @@ async function handleTextInput(to, text, session) {
 
     if (cleanText === verificationCode) {
       await sendTextMessage(to, "Verification successful!");
-      await sendMainMenu(to);
+      await sendMainMenu(to, session);
     } else {
       session.verificationAttempts = (session.verificationAttempts || 0) + 1;
 
