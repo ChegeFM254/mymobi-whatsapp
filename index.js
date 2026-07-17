@@ -3,6 +3,24 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 
+// ============================================================================
+// STANDING CONVENTION — READ BEFORE ADDING ANY NEW SCREEN
+// ============================================================================
+// WhatsApp's interactive "button" message type supports a MAXIMUM of 3
+// buttons. Any screen that needs 4+ options (Accept/Decline/Back/Home/
+// Logout, for example) MUST use the interactive "list" type instead —
+// this is what every multi-option menu in this file already does
+// (sendMainMenu, sendEmergencyLoanMenu, sendLoanTenureOptions,
+// sendLoanAmountMenu, sendLoanBreakdown, sendEditOptions).
+//
+// Rule of thumb when adding a new screen:
+//   - 2-3 short actions (e.g. Accept/Decline)        -> type: "button"
+//   - Anything with Back/Home/Logout, or 4+ options   -> type: "list"
+//
+// Navigable list menus should also register themselves with the Back
+// navigation system — see MENU_BACK_MAP further down this file.
+// ============================================================================
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -40,13 +58,24 @@ const LOAN_TENURE_OPTIONS = {
 // tenure entered by the user. Kept as an async function so swapping in a
 // real API call later (e.g. axios.post to a loans microservice) requires
 // no changes at any call site.
+// TODO: replace with a real call to the loan calculation backend once it
+// exists. For now this returns fixed placeholder figures taken directly
+// from the product spec document for upfrontFee/disbursement/monthlyInstallment
+// — they do NOT scale with the amount or tenure entered by the user.
+// platformFee is the one figure that IS a confirmed rule (KES 150 per
+// month of tenure — 1mo=150, 2mo=300, 3mo=450), so it's calculated rather
+// than hardcoded. Kept as an async function so swapping in a real API
+// call later (e.g. axios.post to a loans microservice) requires no
+// changes at any call site.
+const PLATFORM_FEE_PER_MONTH = 150;
+
 async function getLoanBreakdown(loanAmount, tenureMonths) {
   return {
     loanAmount: loanAmount,
     upfrontFee: 2943,
     disbursement: 32057,
     monthlyInstallment: 14442,
-    platformFee: 150
+    platformFee: PLATFORM_FEE_PER_MONTH * tenureMonths
   };
 }
 
@@ -338,8 +367,7 @@ async function sendRegistrationComplete(to, session) {
         "🔒 Security Notice:\n" +
         "• Your PIN is now active\n" +
         "• Do not share this PIN with anyone\n" +
-        "• For your protection, we strongly recommend deleting this chat or the messages containing your PIN\n" +
-        "• You can change your PIN later from the app settings"
+        "• For your protection, we strongly recommend deleting this chat or the messages containing your PIN"
     );
   await sendMainMenu(to, session);
 }
@@ -462,7 +490,9 @@ async function sendLoanTenureOptions(to, session) {
   await sendMessage(to, payload);
 }
 
-async function sendLoanBreakdown(to, breakdown) {
+async function sendLoanBreakdown(to, breakdown, session) {
+  if (session) session.currentMenu = "loan_breakdown_menu";
+
   const details =
 `Loan ${breakdown.loanAmount.toLocaleString()}
 Upfront Fees ${breakdown.upfrontFee.toLocaleString()}
@@ -470,22 +500,75 @@ Disbursement ${breakdown.disbursement.toLocaleString()}
 Monthly Installment ${breakdown.monthlyInstallment.toLocaleString()}
 Platform Fee ${breakdown.platformFee.toLocaleString()}`;
 
+  // WhatsApp's "button" interactive type supports a maximum of 3 buttons,
+  // but this screen needs 5 options (Accept/Decline/Back/Home/Logout) —
+  // so, like the other multi-option menus in this app, it uses "list"
+  // instead.
   const payload = {
     messaging_product: "whatsapp",
     to: to,
     type: "interactive",
     interactive: {
-      type: "button",
+      type: "list",
+      header: { type: "text", text: "Loan Breakdown" },
       body: { text: details },
+      footer: { text: "MyMobi Emergency Loan" },
       action: {
-        buttons: [
-          { type: "reply", reply: { id: "accept_loan", title: "✅ Accept" } },
-          { type: "reply", reply: { id: "decline_loan", title: "Decline" } }
-        ]
+        button: "Select Option",
+        sections: [{
+          title: "Options",
+          rows: [
+            { id: "accept_loan", title: "✅ Accept", description: "Confirm and proceed" },
+            { id: "decline_loan", title: "Decline", description: "Cancel this loan application" },
+            { id: "back", title: "Back", description: "Return to Enter Loan Amount menu" },
+            { id: "home", title: "Home", description: "Return to home" },
+            { id: "logout", title: "Logout", description: "Log out of the app" }
+          ]
+        }]
       }
     }
   };
   await sendMessage(to, payload);
+}
+
+// Shown after a tenure is selected (and as the "Back" target from the
+// loan breakdown screen). Gives the user a proper menu with navigation
+// options rather than dropping straight into free-text entry with no
+// way back.
+async function sendLoanAmountMenu(to, session) {
+  if (session) session.currentMenu = "loan_amount_menu";
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "interactive",
+    interactive: {
+      type: "list",
+      header: { type: "text", text: "Apply Loan" },
+      body: { text: `Loan limit: KES ${session.loanLimit.toLocaleString()} over ${session.loanTenureMonths} month${session.loanTenureMonths > 1 ? 's' : ''}.` },
+      footer: { text: "MyMobi Emergency Loan" },
+      action: {
+        button: "Select Option",
+        sections: [{
+          title: "Options",
+          rows: [
+            { id: "start_loan_amount_entry", title: "Enter Loan Amount", description: "Type the amount you wish to borrow" },
+            { id: "back", title: "Back", description: "Select a different repayment period" },
+            { id: "home", title: "Home", description: "Return to home" }
+          ]
+        }]
+      }
+    }
+  };
+  await sendMessage(to, payload);
+}
+
+// Shared prompt used both when "Enter Loan Amount" is selected from
+// sendLoanAmountMenu, and internally wherever the free-text amount
+// prompt needs to be (re)sent — keeps every call site in sync.
+async function sendEnterLoanAmountPrompt(to, session) {
+  session.step = "enter_loan_amount";
+  await sendTextMessage(to, `Enter Loan Amount (e.g., 35000). Your limit is KES ${session.loanLimit.toLocaleString()}:`);
 }
 
 // ==================== BUG FIX #3 ====================
@@ -514,7 +597,9 @@ const EDIT_FIELD_LABELS = {
 const MENU_BACK_MAP = {
   civil_servants_menu: (to, session) => sendWelcome(to),                    // Civil Servants Menu -> Welcome
   emergency_loan_menu: (to, session) => sendMainMenu(to, session),          // Emergency Loan submenu -> Civil Servants Menu
-  loan_tenure_menu: (to, session) => sendEmergencyLoanMenu(to, session)     // Loan tenure list -> Emergency Loan submenu
+  loan_tenure_menu: (to, session) => sendEmergencyLoanMenu(to, session),    // Loan tenure list (Select Period) -> Emergency Loan submenu
+  loan_amount_menu: (to, session) => sendLoanTenureOptions(to, session),    // Loan Amount menu -> Select Period page
+  loan_breakdown_menu: (to, session) => sendLoanAmountMenu(to, session)     // Loan breakdown -> Loan Amount menu
 };
 
 // ==================== HANDLERS ====================
@@ -596,9 +681,10 @@ async function handleButton(to, id, session) {
     const tenure = LOAN_TENURE_OPTIONS[id];
     session.loanTenureMonths = tenure.months;
     session.loanLimit = tenure.limit;
-    session.step = "enter_loan_amount";
-    await sendTextMessage(to, `You have a loan limit of KES ${tenure.limit.toLocaleString()} payable in ${tenure.months} month${tenure.months > 1 ? 's' : ''} from your payslip.`);
-    await sendTextMessage(to, "Enter Loan Amount (e.g., 35000):");
+    await sendEnterLoanAmountPrompt(to, session);
+  }
+  else if (id === "start_loan_amount_entry") {
+    await sendEnterLoanAmountPrompt(to, session);
   }
   else if (id === "accept_loan") {
     if (!session.loanBreakdown) {
@@ -735,7 +821,7 @@ async function handleTextInput(to, text, session) {
     const breakdown = await getLoanBreakdown(amount, session.loanTenureMonths);
     session.loanBreakdown = breakdown;
     session.step = "loan_confirm";
-    await sendLoanBreakdown(to, breakdown);
+    await sendLoanBreakdown(to, breakdown, session);
     return;
   }
 
