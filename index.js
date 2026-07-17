@@ -15,7 +15,17 @@ app.use(bodyParser.json());
 const userSessions = {};
 const registeredUsers = {};
 
-// ==================== HELPER FUNCTIONS (NEW) ====================
+// ==================== HELPER FUNCTIONS ====================
+function resetTimeout(from) {
+  if (userSessions[from] && userSessions[from].timeoutId) {
+    clearTimeout(userSessions[from].timeoutId);
+  }
+  userSessions[from].timeoutId = setTimeout(() => {
+    delete userSessions[from];
+    sendTextMessage(from, "⏰ Your session has timed out due to inactivity.").catch(() => {});
+  }, 300000); // 5 minutes
+}
+
 function hasPendingLoan(user) {
   return user && user.loans && user.loans.some(loan => loan.status === "Pending");
 }
@@ -76,7 +86,7 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-// ==================== ORIGINAL SCREENS (Unchanged) ====================
+// ==================== SCREENS ====================
 
 async function sendWelcome(to) {
   const payload = {
@@ -418,7 +428,7 @@ async function handleButton(to, id, session) {
     }
     session.currentLoan = approvedLoan;
     session.step = "pay_installment";
-    await sendTextMessage(to, "Pay Loan feature coming soon (installment selection).");
+    await sendTextMessage(to, "Pay Loan feature is under development.");
   }
   else if (id === "enter_pin") {
     session.step = "enter_pin";
@@ -478,14 +488,14 @@ async function handleButton(to, id, session) {
   }
 }
 
-// ==================== TEXT INPUT (Original + New) ====================
+// ==================== TEXT INPUT ====================
 
 async function handleTextInput(to, text, session) {
   const cleanText = text.trim();
   const step = session.step;
   const user = registeredUsers[to];
 
-  // ==================== NEW: APPROVE LOAN ====================
+  // ==================== NEW LOAN FLOWS ====================
   if (step === "approve_payroll") {
     session.payrollNumber = cleanText;
     session.step = "approve_code";
@@ -513,7 +523,6 @@ async function handleTextInput(to, text, session) {
     return;
   }
 
-  // ==================== NEW: CANCEL LOAN ====================
   if (step === "cancel_confirm") {
     if (cleanText.toLowerCase() === "yes") {
       if (session.currentLoan) session.currentLoan.status = "Cancelled";
@@ -563,7 +572,6 @@ async function handleTextInput(to, text, session) {
     }
   }
 
-  // EDIT FLOW
   if (step.startsWith("edit_")) {
     if (!cleanText) { await sendTextMessage(to, "Please enter a valid value."); return; }
     const field = step.replace("edit_", "");
@@ -576,7 +584,6 @@ async function handleTextInput(to, text, session) {
     return;
   }
 
-  // REGISTRATION OTP + PIN
   if (step === "enter_otp") {
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
@@ -622,7 +629,6 @@ async function handleTextInput(to, text, session) {
     return;
   }
 
-  // RETURNING USER PIN + VERIFICATION
   if (step === "enter_pin") {
     if (!cleanText) { await sendTextMessage(to, "Please enter your 5-digit PIN."); return; }
     if (!/^\d{5}$/.test(cleanText)) { await sendTextMessage(to, "Invalid PIN."); return; }
@@ -671,7 +677,6 @@ async function handleTextInput(to, text, session) {
     return;
   }
 
-  // FORGOT PIN & OPT OUT (kept from original)
   if (step === "forgot_pin") {
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid OTP.");
