@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
@@ -5,9 +6,14 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ACCESS_TOKEN = 'EAAOxVVXxgvUBR7ZAnegjAq5UZCfeYqEkhevYGOEhXhLjkV6hIFdyB7uLI7mrAyvHHZBdXBEfZBnbwOLAfqJK2zryzGKKGNvtfpGLFi3QO054qhkVo8f9mYP4KIG5a0ZALX6ZABltcWEJQSsHE7Lc307OZCyNAARzQ0IdcLpy30FrpRI6OpFeZBFZCfHFkSIhOTHpQDgZDZD';
-const PHONE_NUMBER_ID = '1265967949926220';
-const VERIFY_TOKEN = 'mymobi_test_123';
+// ==================== CONFIG (now from environment) ====================
+const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
+const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'mymobi_test_123';
+
+if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) {
+  console.warn('⚠️  WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID is not set. Create a .env file (see .env.example).');
+}
 
 app.use(bodyParser.json());
 
@@ -41,6 +47,12 @@ app.get('/webhook', (req, res) => {
   }
 });
 
+// ==================== BUG FIX #1 ====================
+// Original code did `return;` inside the try block after sendWelcome(),
+// which skipped res.sendStatus(200) entirely. That left Meta's webhook
+// call hanging until it timed out and retried, causing duplicate
+// welcome messages. Fix: never return early past the response — always
+// fall through to res.sendStatus(200).
 app.post('/webhook', async (req, res) => {
   try {
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
@@ -64,10 +76,7 @@ app.post('/webhook', async (req, res) => {
     if (isTriggerWord && session.step === 'welcome' && session.isNewSession === true) {
       await sendWelcome(from);
       session.isNewSession = false;   // Prevent it from showing again
-      return;
-    }
-
-    if (buttonId) {
+    } else if (buttonId) {
       await handleButton(from, buttonId, session);
     } else if (text) {
       await handleTextInput(from, text, session);
@@ -143,7 +152,7 @@ async function sendTerms(to) {
 }
 
 async function sendConfirmation(to, session) {
-  const details = 
+  const details =
 `Confirm Details:
 
 First Name: ${session.firstName || ''}
@@ -221,14 +230,6 @@ async function sendAuthMenu(to) {
   await sendMessage(to, payload);
 }
 
-async function triggerOTPAndShowEnterOTPScreen(to, session) {
-    session.otp = "12345";
-    session.otpAttempts = 0;
-    session.step = "enter_otp";
-
-    await sendTextMessage(to, "A OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
-}
-
 async function sendEnterNewPIN(to) {
     await sendTextMessage(to, "Create a new 5-digit PIN for your account.\n\nDo not share this PIN with anyone.");
 }
@@ -247,7 +248,7 @@ async function sendRegistrationComplete(to, session) {
         };
         console.log(`User registered: ${session.mobileNumber}`);
     }
-    await sendTextMessage(to, 
+    await sendTextMessage(to,
         "🎉 Registration Complete!\n\n" +
         "Your account has been successfully set up.\n\n" +
         "🔒 Security Notice:\n" +
@@ -256,13 +257,40 @@ async function sendRegistrationComplete(to, session) {
         "• For your protection, we strongly recommend deleting this chat or the messages containing your PIN\n" +
         "• You can change your PIN later from the app settings"
     );
-  console.log("=== DEBUG: About to send Main Menu ===");
   await sendMainMenu(to);
 
     if (userSessions[to]) {
         delete userSessions[to].otp;
         delete userSessions[to].newPin;
     }
+}
+
+// ==================== BUG FIX #2 (new function) ====================
+// Forgot-PIN previously reused sendRegistrationComplete(), which only
+// writes a PIN when session.mobileNumber is set. Returning users never
+// go through the mobile-number collection step, so that guard silently
+// failed and the PIN was never updated in registeredUsers — the user
+// stayed locked out with their old PIN, while seeing a "Registration
+// Complete" message that made no sense for a PIN reset.
+async function sendPinResetComplete(to, session) {
+  const user = registeredUsers[to];
+  if (user && session.newPin) {
+    user.pin = session.newPin;
+    user.failedPinAttempts = 0;
+    user.status = "active";
+    console.log(`PIN reset for user: ${to}`);
+  }
+  await sendTextMessage(to,
+    "✅ Your PIN has been updated successfully.\n\n" +
+    "🔒 Do not share this PIN with anyone."
+  );
+  await sendMainMenu(to);
+
+  if (userSessions[to]) {
+    delete userSessions[to].otp;
+    delete userSessions[to].newPin;
+    delete userSessions[to].isPinReset;
+  }
 }
 
 async function sendMainMenu(to) {
@@ -293,97 +321,104 @@ async function sendMainMenu(to) {
     await sendMessage(to, payload);
 }
 
-async function sendSuccess(to) {
-  await sendTextMessage(to, "✅ Registration Data Received\n\nThank you. Your details have been received and are being processed. You will be notified of the outcome shortly.");
-
-  setTimeout(async () => {
-    await sendWelcome(to);
-    delete userSessions[to];
-  }, 5000);
-}
+// ==================== BUG FIX #3 ====================
+// Original: id.replace("edit_", "").replace("_", " ") mangled labels
+// like "edit_nationalid" -> "nationalid" (no underscore to replace).
+// Fix: explicit lookup map so every field gets a proper display name.
+const EDIT_FIELD_LABELS = {
+  edit_firstname: "First Name",
+  edit_lastname: "Last Name",
+  edit_upn: "UPN",
+  edit_nationalid: "National ID",
+  edit_mobilenumber: "Mobile Number (Mpesa)"
+};
 
 // ==================== HANDLERS ====================
 
 async function handleButton(to, id, session) {
   if (id === "civil_servants") {
-  const user = registeredUsers[to];
+    const user = registeredUsers[to];
 
-  if (user && user.status === "blocked") {
-    await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
-    return;
-  }
+    if (user && user.status === "blocked") {
+      await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
+      return;
+    }
 
-  if (user && user.status === "active") {
-    // Returning user - show authentication options
-    session.step = "auth_menu";
-    await sendAuthMenu(to);
-  } else {
-    // New user or opted out - start registration
-    session.step = "optin";
-    await sendOptIn(to);
+    if (user && user.status === "active") {
+      // Returning user - show authentication options
+      session.step = "auth_menu";
+      await sendAuthMenu(to);
+    } else {
+      // New user or opted out - start registration
+      session.step = "optin";
+      await sendOptIn(to);
+    }
   }
-}
-    // ==================== AUTHENTICATION MENU (Returning Users) ====================
+  // ==================== AUTHENTICATION MENU (Returning Users) ====================
   else if (id === "enter_pin") {
     session.step = "enter_pin";
     await sendTextMessage(to, "Enter your PIN:");
   }
   else if (id === "forgot_pin") {
-  session.step = "forgot_pin";
-  await sendTextMessage(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
-  // For now, we simulate OTP
-  session.otp = "67890"; // Different from registration OTP
-}
-
-else if (id === "opt_out") {
-  session.step = "opt_out_confirmation";
-  await sendTextMessage(to, "You are about to OPT OUT of Emergency Loan Services.\n\nDo you want to proceed? (Yes/No)");
-}
+    session.step = "forgot_pin";
+    session.isPinReset = true; // marks this as a reset flow, not fresh registration
+    session.otp = "67890"; // simulated OTP, different from registration OTP
+    session.otpAttempts = 0;
+    await sendTextMessage(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
+  }
+  else if (id === "opt_out") {
+    session.step = "opt_out_confirmation";
+    await sendTextMessage(to, "You are about to OPT OUT of Emergency Loan Services.\n\nDo you want to proceed? (Yes/No)");
+  }
   else if (id === "optin_yes") {
     session.step = "tc";
     await sendTerms(to);
-  } 
+  }
   else if (id === "optin_no") {
     await sendWelcome(to);
-  } 
+  }
   else if (id === "accept_tc") {
     session.step = "first_name";
     await sendTextMessage(to, "Enter your First Name");
-  } 
+  }
   else if (id === "decline_tc") {
     await sendWelcome(to);
-  } 
+  }
   else if (id === "confirm_details") {
     session.otp = "12345";
     session.otpAttempts = 0;
     session.step = "enter_otp";
 
     await sendTextMessage(to, "An OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
-  } 
+  }
   else if (id === "edit_details") {
     await sendEditOptions(to);
-  } 
+  }
   else if (id === "exit_edit") {
     await sendConfirmation(to, session);
-  } 
+  }
   else if (id.startsWith("edit_")) {
     session.step = id;
-    let fieldName = id.replace("edit_", "").replace("_", " ");
-    if (fieldName === "mobilenumber") fieldName = "Mobile Number (Mpesa)";
+    const fieldName = EDIT_FIELD_LABELS[id] || "field";
     await sendTextMessage(to, `Enter new ${fieldName}:`);
   }
   else if (id === "emergency_loan") {
     await sendTextMessage(to, "You selected Emergency Loan. (Feature coming soon)");
-  } 
+  }
   else if (id === "get_payslip") {
     await sendTextMessage(to, "You selected Get Payslip. (Feature coming soon)");
-  } 
+  }
   else if (id === "back" || id === "home") {
     await sendWelcome(to);
-  } 
+  }
   else if (id === "logout") {
     await sendTextMessage(to, "You have been logged out.");
     delete userSessions[to];
+  }
+  else {
+    // Fallback for unrecognized button ids so users never get silence
+    await sendTextMessage(to, "Sorry, I didn't understand that option. Returning to the main menu.");
+    await sendWelcome(to);
   }
 }
 
@@ -522,7 +557,13 @@ async function handleTextInput(to, text, session) {
 
   if (step === "confirm_new_pin") {
     if (cleanText === session.newPin) {
-      await sendRegistrationComplete(to, session);
+      // BUG FIX #2: route to the correct completion handler depending on
+      // whether this is a fresh registration or a forgot-PIN reset.
+      if (session.isPinReset) {
+        await sendPinResetComplete(to, session);
+      } else {
+        await sendRegistrationComplete(to, session);
+      }
     } else {
       await sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
       session.step = "enter_new_pin";
@@ -653,6 +694,11 @@ async function handleTextInput(to, text, session) {
     }
     return;
   }
+
+  // Fallback for unrecognized step values so users never get silence
+  await sendTextMessage(to, "Sorry, something went wrong. Let's start over.");
+  await sendWelcome(to);
+  delete userSessions[to];
 }
 
 async function sendTextMessage(to, text) {
