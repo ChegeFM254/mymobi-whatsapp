@@ -441,6 +441,19 @@ async function sendPinResetComplete(to, session) {
 
 async function sendMainMenu(to, session) {
     if (session) session.currentMenu = "civil_servants_menu";
+
+    // BUG FIX: description used to always say "Apply for emergency loan"
+    // even when the user's real next action there is to approve, cancel,
+    // or pay an existing loan — misleading, since tapping "Emergency
+    // Loan" no longer leads to Apply Loan in those cases.
+    const loan = currentLoans[to];
+    let emergencyLoanDescription = "Apply for Emergency Loan";
+    if (loan && loan.status === "pending_approval") {
+      emergencyLoanDescription = "Approve or Cancel Loan Application";
+    } else if (loan && loan.status === "approved") {
+      emergencyLoanDescription = "Pay for Emergency Loan";
+    }
+
     const payload = {
         messaging_product: "whatsapp",
         to: to,
@@ -455,7 +468,7 @@ async function sendMainMenu(to, session) {
                 sections: [{
                     title: "Options",
                     rows: [
-                        { id: "emergency_loan", title: "Emergency Loan", description: "Apply for emergency loan" },
+                        { id: "emergency_loan", title: "Emergency Loan", description: emergencyLoanDescription },
                         { id: "get_payslip", title: "Get Payslip", description: "Download your payslip" },
                         { id: "back", title: "Back", description: "Go back" },
                         { id: "home", title: "Home", description: "Return to home" },
@@ -657,7 +670,7 @@ async function sendApproveLoanDetails(to, session) {
         sections: [{
           title: "Options",
           rows: [
-            { id: "confirm_approve_loan", title: "Approve Loan", description: "Confirm and proceed" },
+            { id: "confirm_approve_loan", title: "Enter Approval Code", description: "Confirm and proceed" },
             { id: "cancel_loan", title: "Cancel Loan", description: "Cancel this loan application" },
             { id: "back", title: "Back", description: "Go back" },
             { id: "home", title: "Home", description: "Return to home" },
@@ -980,7 +993,7 @@ async function handleButton(to, id, session) {
     }
     delete session.pendingPaymentInstallments;
 
-    await sendTextMessage(to, "Thank you for using MyMobi.");
+    await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. Thank you for using MyMobi services.`);
     await sendMainMenu(to, session);
   }
   else if (id === "get_payslip") {
