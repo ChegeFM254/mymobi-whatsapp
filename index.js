@@ -22,6 +22,34 @@ const userSessions = {};
 // ==================== REGISTERED USERS STORAGE ====================
 const registeredUsers = {};   // Key = WhatsApp number (from), Value = user data
 
+// ==================== EMERGENCY LOAN ====================
+const loanApplications = {}; // Key = WhatsApp number, Value = array of submitted loan applications
+
+// Tenure options shown when a user starts a loan application. `limit` is
+// the maximum loan amount allowed for that repayment period, per the
+// product spec document.
+const LOAN_TENURE_OPTIONS = {
+  tenure_1: { months: 1, limit: 20000, label: "1 Month" },
+  tenure_2: { months: 2, limit: 40000, label: "2 Months" },
+  tenure_3: { months: 3, limit: 60000, label: "3 Months" }
+};
+
+// TODO: replace with a real call to the loan calculation backend once it
+// exists. For now this returns fixed placeholder figures taken directly
+// from the product spec document — they do NOT scale with the amount or
+// tenure entered by the user. Kept as an async function so swapping in a
+// real API call later (e.g. axios.post to a loans microservice) requires
+// no changes at any call site.
+async function getLoanBreakdown(loanAmount, tenureMonths) {
+  return {
+    loanAmount: loanAmount,
+    upfrontFee: 2943,
+    disbursement: 32057,
+    monthlyInstallment: 14442,
+    platformFee: 150
+  };
+}
+
 // ==================== MESSAGE DEDUPLICATION ====================
 // WhatsApp/Meta will re-send (retry) a webhook call if your server doesn't
 // respond fast enough, or after certain network hiccups. Without tracking
@@ -373,6 +401,90 @@ async function sendMainMenu(to) {
     await sendMessage(to, payload);
 }
 
+// ==================== EMERGENCY LOAN SCREENS ====================
+
+async function sendEmergencyLoanMenu(to) {
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "interactive",
+    interactive: {
+      type: "list",
+      header: { type: "text", text: "Emergency Loan" },
+      body: { text: "What would you like to do?" },
+      footer: { text: "MyMobi" },
+      action: {
+        button: "Select Option",
+        sections: [{
+          title: "Options",
+          rows: [
+            { id: "apply_loan", title: "Apply Loan", description: "Apply for an emergency loan" },
+            { id: "back", title: "Back", description: "Go back" },
+            { id: "home", title: "Home", description: "Return to home" },
+            { id: "logout", title: "Logout", description: "Log out of the app" }
+          ]
+        }]
+      }
+    }
+  };
+  await sendMessage(to, payload);
+}
+
+async function sendLoanTenureOptions(to) {
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "interactive",
+    interactive: {
+      type: "list",
+      header: { type: "text", text: "Apply Loan" },
+      body: { text: "Select your repayment period:" },
+      footer: { text: "MyMobi Emergency Loan" },
+      action: {
+        button: "Select Period",
+        sections: [{
+          title: "Repayment Period",
+          rows: [
+            { id: "tenure_1", title: LOAN_TENURE_OPTIONS.tenure_1.label, description: `Loan limit KES ${LOAN_TENURE_OPTIONS.tenure_1.limit.toLocaleString()}` },
+            { id: "tenure_2", title: LOAN_TENURE_OPTIONS.tenure_2.label, description: `Loan limit KES ${LOAN_TENURE_OPTIONS.tenure_2.limit.toLocaleString()}` },
+            { id: "tenure_3", title: LOAN_TENURE_OPTIONS.tenure_3.label, description: `Loan limit KES ${LOAN_TENURE_OPTIONS.tenure_3.limit.toLocaleString()}` },
+            { id: "back", title: "Back", description: "Go back" },
+            { id: "home", title: "Home", description: "Return to home" },
+            { id: "logout", title: "Logout", description: "Log out of the app" }
+          ]
+        }]
+      }
+    }
+  };
+  await sendMessage(to, payload);
+}
+
+async function sendLoanBreakdown(to, breakdown) {
+  const details =
+`Loan ${breakdown.loanAmount.toLocaleString()}
+Upfront Fees ${breakdown.upfrontFee.toLocaleString()}
+Disbursement ${breakdown.disbursement.toLocaleString()}
+Monthly Installment ${breakdown.monthlyInstallment.toLocaleString()}
+Platform Fee ${breakdown.platformFee.toLocaleString()}`;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: details },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "accept_loan", title: "✅ Accept" } },
+          { type: "reply", reply: { id: "decline_loan", title: "Decline" } }
+        ]
+      }
+    }
+  };
+  await sendMessage(to, payload);
+}
+
 // ==================== BUG FIX #3 ====================
 // Original: id.replace("edit_", "").replace("_", " ") mangled labels
 // like "edit_nationalid" -> "nationalid" (no underscore to replace).
@@ -384,6 +496,7 @@ const EDIT_FIELD_LABELS = {
   edit_nationalid: "National ID",
   edit_mobilenumber: "Mobile Number (Mpesa)"
 };
+
 
 // ==================== HANDLERS ====================
 
@@ -455,7 +568,37 @@ async function handleButton(to, id, session) {
     await sendTextMessage(to, `Enter new ${fieldName}:`);
   }
   else if (id === "emergency_loan") {
-    await sendTextMessage(to, "You selected Emergency Loan. (Feature coming soon)");
+    await sendEmergencyLoanMenu(to);
+  }
+  else if (id === "apply_loan") {
+    await sendLoanTenureOptions(to);
+  }
+  else if (LOAN_TENURE_OPTIONS[id]) {
+    const tenure = LOAN_TENURE_OPTIONS[id];
+    session.loanTenureMonths = tenure.months;
+    session.loanLimit = tenure.limit;
+    session.step = "enter_loan_amount";
+    await sendTextMessage(to, `You have a loan limit of KES ${tenure.limit.toLocaleString()} payable in ${tenure.months} month${tenure.months > 1 ? 's' : ''} from your payslip.`);
+    await sendTextMessage(to, "Enter Loan Amount (e.g., 35000):");
+  }
+  else if (id === "accept_loan") {
+    if (!session.loanBreakdown) {
+      // Defensive: shouldn't happen in normal flow, but avoids a crash
+      // if a stale button is tapped after the session moved on.
+      await sendTextMessage(to, "That loan application has expired. Let's start again.");
+      await sendEmergencyLoanMenu(to);
+      return;
+    }
+    session.step = "enter_payroll_number";
+    await sendTextMessage(to, "Please Enter Payroll Number to complete the transaction:");
+  }
+  else if (id === "decline_loan") {
+    delete session.loanTenureMonths;
+    delete session.loanLimit;
+    delete session.loanAmount;
+    delete session.loanBreakdown;
+    await sendTextMessage(to, "Loan application declined.");
+    await sendEmergencyLoanMenu(to);
   }
   else if (id === "get_payslip") {
     await sendTextMessage(to, "You selected Get Payslip. (Feature coming soon)");
@@ -536,6 +679,71 @@ async function handleTextInput(to, text, session) {
       await sendConfirmation(to, session);
       return;
     }
+  }
+
+  // =====================================================
+  // EMERGENCY LOAN: AMOUNT ENTRY + PAYROLL NUMBER
+  // =====================================================
+  if (step === "enter_loan_amount") {
+    // Only digits, no decimals/commas/symbols — keeps parsing unambiguous
+    if (!/^\d+$/.test(cleanText)) {
+      await sendTextMessage(to, "Please enter a valid loan amount in KES (numbers only, e.g. 35000).");
+      return;
+    }
+
+    const amount = parseInt(cleanText, 10);
+
+    if (amount <= 0) {
+      await sendTextMessage(to, "Please enter a loan amount greater than 0.");
+      return;
+    }
+
+    if (amount > session.loanLimit) {
+      await sendTextMessage(to, `That exceeds your loan limit of KES ${session.loanLimit.toLocaleString()}. Please enter a lower amount.`);
+      return;
+    }
+
+    session.loanAmount = amount;
+    const breakdown = await getLoanBreakdown(amount, session.loanTenureMonths);
+    session.loanBreakdown = breakdown;
+    session.step = "loan_confirm";
+    await sendLoanBreakdown(to, breakdown);
+    return;
+  }
+
+  if (step === "enter_payroll_number") {
+    if (!cleanText) {
+      await sendTextMessage(to, "Please enter your Payroll Number.");
+      return;
+    }
+
+    session.payrollNumber = cleanText;
+
+    // Record the submitted application (mirrors registeredUsers pattern)
+    // for whatever admin/backend process picks these up later.
+    if (!loanApplications[to]) loanApplications[to] = [];
+    loanApplications[to].push({
+      loanAmount: session.loanAmount,
+      tenureMonths: session.loanTenureMonths,
+      breakdown: session.loanBreakdown,
+      payrollNumber: session.payrollNumber,
+      submittedAt: new Date().toISOString(),
+      status: "submitted"
+    });
+    console.log(`Loan application submitted by ${to}: KES ${session.loanAmount} over ${session.loanTenureMonths} month(s)`);
+
+    await sendTextMessage(to, "Your loan request has been submitted. Please wait for an SMS from MyMobi.");
+
+    // Clean up loan-specific session fields now that the application is
+    // recorded, then return to the main menu.
+    delete session.loanTenureMonths;
+    delete session.loanLimit;
+    delete session.loanAmount;
+    delete session.loanBreakdown;
+    delete session.payrollNumber;
+
+    await sendMainMenu(to);
+    return;
   }
 
   // =====================================================
