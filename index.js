@@ -258,7 +258,6 @@ async function sendRegistrationComplete(to, session) {
         "• You can change your PIN later from the app settings"
     );
   console.log("=== DEBUG: About to send Main Menu ===");
-  
   await sendMainMenu(to);
 
     if (userSessions[to]) {
