@@ -394,12 +394,12 @@ async function handleTextInput(to, text, session) {
   const step = session.step;
 
   // ==================== PROCESSING GUARD ====================
-  // Prevents the same message from being processed multiple times quickly
   if (session.lastProcessed && (Date.now() - session.lastProcessed < 800)) {
     return;
   }
   session.lastProcessed = Date.now();
-}
+  // ========================================================
+
   // =====================================================
   // KYC DATA COLLECTION (with strict guard)
   // =====================================================
