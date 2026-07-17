@@ -22,6 +22,39 @@ const userSessions = {};
 // ==================== REGISTERED USERS STORAGE ====================
 const registeredUsers = {};   // Key = WhatsApp number (from), Value = user data
 
+// ==================== MESSAGE DEDUPLICATION ====================
+// WhatsApp/Meta will re-send (retry) a webhook call if your server doesn't
+// respond fast enough, or after certain network hiccups. Without tracking
+// which message IDs have already been handled, a single retry causes the
+// whole reply flow to run twice (or more) in rapid succession — which is
+// exactly what trips WhatsApp's (#131056) "pair rate limit" error, since
+// it looks like you're firing several messages at the same recipient in
+// a very short window. Every incoming WhatsApp message has a unique `id`;
+// we remember IDs we've already processed and skip duplicates.
+const processedMessageIds = new Map(); // messageId -> processedAtTimestamp
+const MESSAGE_ID_TTL_MS = 10 * 60 * 1000; // keep IDs for 10 minutes, then forget them
+
+function isDuplicateMessage(messageId) {
+  if (!messageId) return false; // can't dedupe without an id; let it through
+
+  const now = Date.now();
+
+  if (processedMessageIds.has(messageId)) {
+    return true; // already handled this exact message — it's a retry
+  }
+
+  processedMessageIds.set(messageId, now);
+
+  // Light cleanup so this map doesn't grow forever
+  for (const [id, ts] of processedMessageIds) {
+    if (now - ts > MESSAGE_ID_TTL_MS) {
+      processedMessageIds.delete(id);
+    }
+  }
+
+  return false;
+}
+
 // 60-second inactivity timeout
 function resetTimeout(from) {
   if (userSessions[from] && userSessions[from].timeoutId) {
@@ -58,6 +91,12 @@ app.post('/webhook', async (req, res) => {
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!message) return res.sendStatus(200);
 
+    // BUG FIX #4: ignore retried/duplicate webhook deliveries for a
+    // message we've already handled — see MESSAGE DEDUPLICATION above.
+    if (isDuplicateMessage(message.id)) {
+      return res.sendStatus(200);
+    }
+
     const from = message.from;
     const text = message.text?.body || '';
     const lowerText = text.toLowerCase().trim();
@@ -71,6 +110,14 @@ app.post('/webhook', async (req, res) => {
 
     resetTimeout(from);
     const session = userSessions[from];
+
+    // BUG FIX #4 (continued): debounce guard now covers BOTH button taps
+    // and typed text, not just text. Previously this only lived inside
+    // handleTextInput(), so double-tapping a button had no protection.
+    if (session.lastProcessed && (Date.now() - session.lastProcessed < 800)) {
+      return res.sendStatus(200);
+    }
+    session.lastProcessed = Date.now();
 
     // Only show Welcome page once per fresh session
     if (isTriggerWord && session.step === 'welcome' && session.isNewSession === true) {
@@ -425,13 +472,6 @@ async function handleButton(to, id, session) {
 async function handleTextInput(to, text, session) {
   const cleanText = text.trim();
   const step = session.step;
-
-  // ==================== PROCESSING GUARD ====================
-  if (session.lastProcessed && (Date.now() - session.lastProcessed < 800)) {
-    return;
-  }
-  session.lastProcessed = Date.now();
-  // ========================================================
 
   // =====================================================
   // KYC DATA COLLECTION (with strict guard)
