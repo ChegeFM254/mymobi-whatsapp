@@ -41,7 +41,17 @@ const userSessions = {};
 const registeredUsers = {};   // Key = WhatsApp number (from), Value = user data
 
 // ==================== EMERGENCY LOAN ====================
-const loanApplications = {}; // Key = WhatsApp number, Value = array of submitted loan applications
+const loanApplications = {}; // Key = WhatsApp number, Value = array of ALL submitted loan applications (audit trail)
+
+// The user's CURRENT loan (drives which options the Emergency Loan menu
+// shows). Only one active loan per user is supported, matching the
+// product spec ("no purpose in displaying Apply Loan and Pay Loan menus"
+// while an application is pending). Absence of an entry (or status
+// "paid"/"cancelled") means the user is free to apply for a new loan.
+//
+// status lifecycle: "pending_approval" -> "approved" -> "paid"
+//                                       -> "cancelled" (from pending_approval only)
+const currentLoans = {}; // Key = WhatsApp number, Value = current loan record
 
 // Tenure options shown when a user starts a loan application. `limit` is
 // the maximum loan amount allowed for that repayment period, per the
@@ -52,12 +62,6 @@ const LOAN_TENURE_OPTIONS = {
   tenure_3: { months: 3, limit: 60000, label: "3 Months" }
 };
 
-// TODO: replace with a real call to the loan calculation backend once it
-// exists. For now this returns fixed placeholder figures taken directly
-// from the product spec document — they do NOT scale with the amount or
-// tenure entered by the user. Kept as an async function so swapping in a
-// real API call later (e.g. axios.post to a loans microservice) requires
-// no changes at any call site.
 // TODO: replace with a real call to the loan calculation backend once it
 // exists. For now this returns fixed placeholder figures taken directly
 // from the product spec document for upfrontFee/disbursement/monthlyInstallment
@@ -78,6 +82,40 @@ async function getLoanBreakdown(loanAmount, tenureMonths) {
     platformFee: PLATFORM_FEE_PER_MONTH * tenureMonths
   };
 }
+
+// TODO: replace with real backend-issued values once the loan system
+// exists. For now these are simulated locally so the Approve Loan flow
+// can be built and tested end-to-end.
+function generateLoanRefNo() {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let ref = "MH";
+  for (let i = 0; i < 6; i++) {
+    ref += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return ref;
+}
+
+function generateApprovalCode() {
+  return String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+}
+
+function computeDueDate(tenureMonths) {
+  const due = new Date();
+  due.setMonth(due.getMonth() + tenureMonths);
+  return due.toISOString().split('T')[0]; // YYYY-MM-DD
+}
+
+// TODO: replace with a real Safaricom Daraja API STK Push integration
+// once it's available. For now, payment is simulated as immediately
+// successful so the Pay Loan flow can be built and tested end-to-end
+// ahead of the real payments backend. Kept as an async function
+// returning a result object so swapping in the real API call later
+// requires no changes at the call site.
+async function triggerMpesaStkPush(to, amount) {
+  console.log(`[SIMULATED] M-Pesa STK Push triggered for ${to}: KES ${amount}`);
+  return { success: true };
+}
+
 
 // ==================== MESSAGE DEDUPLICATION ====================
 // WhatsApp/Meta will re-send (retry) a webhook call if your server doesn't
@@ -434,6 +472,40 @@ async function sendMainMenu(to, session) {
 
 async function sendEmergencyLoanMenu(to, session) {
   if (session) session.currentMenu = "emergency_loan_menu";
+
+  const loan = currentLoans[to];
+  let rows;
+
+  if (loan && loan.status === "pending_approval") {
+    // Application submitted, awaiting approval code entry. Apply Loan
+    // and Pay Loan have no purpose here — per spec, only these options
+    // are relevant until the pending application is resolved.
+    rows = [
+      { id: "approve_loan_menu", title: "Approve Loan", description: "Enter your approval code" },
+      { id: "cancel_loan", title: "Cancel Loan", description: "Cancel this loan application" },
+      { id: "back", title: "Back", description: "Go back" },
+      { id: "home", title: "Home", description: "Return to home" },
+      { id: "logout", title: "Logout", description: "Log out of the app" }
+    ];
+  } else if (loan && loan.status === "approved") {
+    // Loan is approved/disbursed with an outstanding balance. Apply Loan
+    // isn't relevant until this one is fully paid.
+    rows = [
+      { id: "pay_loan_menu", title: "Pay Loan", description: "Make an early repayment" },
+      { id: "back", title: "Back", description: "Go back" },
+      { id: "home", title: "Home", description: "Return to home" },
+      { id: "logout", title: "Logout", description: "Log out of the app" }
+    ];
+  } else {
+    // No loan, or previous one is fully paid/cancelled — free to apply.
+    rows = [
+      { id: "apply_loan", title: "Apply Loan", description: "Apply for an emergency loan" },
+      { id: "back", title: "Back", description: "Go back" },
+      { id: "home", title: "Home", description: "Return to home" },
+      { id: "logout", title: "Logout", description: "Log out of the app" }
+    ];
+  }
+
   const payload = {
     messaging_product: "whatsapp",
     to: to,
@@ -445,15 +517,7 @@ async function sendEmergencyLoanMenu(to, session) {
       footer: { text: "MyMobi" },
       action: {
         button: "Select Option",
-        sections: [{
-          title: "Options",
-          rows: [
-            { id: "apply_loan", title: "Apply Loan", description: "Apply for an emergency loan" },
-            { id: "back", title: "Back", description: "Go back" },
-            { id: "home", title: "Home", description: "Return to home" },
-            { id: "logout", title: "Logout", description: "Log out of the app" }
-          ]
-        }]
+        sections: [{ title: "Options", rows: rows }]
       }
     }
   };
@@ -571,6 +635,139 @@ async function sendEnterLoanAmountPrompt(to, session) {
   await sendTextMessage(to, `Enter Loan Amount (e.g., 35000). Your limit is KES ${session.loanLimit.toLocaleString()}:`);
 }
 
+// ==================== APPROVE LOAN SCREENS ====================
+
+async function sendApproveLoanDetails(to, session) {
+  if (session) session.currentMenu = "approve_loan_details_menu";
+
+  const loan = currentLoans[to];
+  const details = `You are about to approve ${loan.tenureMonths}-month loan of KES ${loan.loanAmount.toLocaleString()} Ref. No. ${loan.refNo} payable on ${loan.dueDate}`;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "interactive",
+    interactive: {
+      type: "list",
+      header: { type: "text", text: "Approve Loan" },
+      body: { text: details },
+      footer: { text: "MyMobi Emergency Loan" },
+      action: {
+        button: "Select Option",
+        sections: [{
+          title: "Options",
+          rows: [
+            { id: "confirm_approve_loan", title: "Approve Loan", description: "Confirm and proceed" },
+            { id: "cancel_loan", title: "Cancel Loan", description: "Cancel this loan application" },
+            { id: "back", title: "Back", description: "Go back" },
+            { id: "home", title: "Home", description: "Return to home" },
+            { id: "logout", title: "Logout", description: "Log out of the app" }
+          ]
+        }]
+      }
+    }
+  };
+  await sendMessage(to, payload);
+}
+
+// ==================== CANCEL LOAN SCREENS ====================
+
+async function sendCancelLoanConfirm(to, session) {
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: "Are you sure you want to cancel your loan application?" },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "cancel_loan_yes", title: "Yes" } },
+          { type: "reply", reply: { id: "cancel_loan_no", title: "No" } }
+        ]
+      }
+    }
+  };
+  await sendMessage(to, payload);
+}
+
+// ==================== PAY LOAN SCREENS (EARLY REPAYMENT) ====================
+
+async function sendPayLoanOptions(to, session) {
+  if (session) session.currentMenu = "pay_loan_menu";
+
+  const loan = currentLoans[to];
+  const remainingInstallments = loan.tenureMonths - loan.installmentsPaid;
+
+  const rows = [];
+  for (let n = 1; n <= remainingInstallments; n++) {
+    const amount = loan.breakdown.monthlyInstallment * n;
+    rows.push({
+      id: `pay_installments_${n}`,
+      title: `${n} Installment${n > 1 ? 's' : ''}`,
+      description: `KES ${amount.toLocaleString()}`
+    });
+  }
+  rows.push({ id: "back", title: "Back", description: "Go back" });
+  rows.push({ id: "home", title: "Home", description: "Return to home" });
+  rows.push({ id: "logout", title: "Logout", description: "Log out of the app" });
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "interactive",
+    interactive: {
+      type: "list",
+      header: { type: "text", text: "Pay Loan" },
+      body: { text: "Select how many installments you'd like to pay:" },
+      footer: { text: "MyMobi Emergency Loan" },
+      action: {
+        button: "Select Option",
+        sections: [{ title: "Payment Options", rows: rows }]
+      }
+    }
+  };
+  await sendMessage(to, payload);
+}
+
+async function sendPayLoanConfirm(to, session, installmentsToPay) {
+  if (session) session.currentMenu = "pay_loan_confirm_menu";
+
+  const loan = currentLoans[to];
+  const payAmount = loan.breakdown.monthlyInstallment * installmentsToPay;
+  const totalOwed = loan.breakdown.monthlyInstallment * (loan.tenureMonths - loan.installmentsPaid);
+  const balance = totalOwed - payAmount;
+
+  session.pendingPaymentInstallments = installmentsToPay;
+
+  const details = `You are about to pay ${installmentsToPay} installment${installmentsToPay > 1 ? 's' : ''} of ${payAmount.toLocaleString()}. Loan Balance ${balance.toLocaleString()}`;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "interactive",
+    interactive: {
+      type: "list",
+      header: { type: "text", text: "Confirm Payment" },
+      body: { text: details },
+      footer: { text: "MyMobi Emergency Loan" },
+      action: {
+        button: "Select Option",
+        sections: [{
+          title: "Options",
+          rows: [
+            { id: "proceed_payment", title: "Proceed", description: "Pay via M-Pesa" },
+            { id: "back", title: "Back", description: "Go back" },
+            { id: "home", title: "Home", description: "Return to home" },
+            { id: "logout", title: "Logout", description: "Log out of the app" }
+          ]
+        }]
+      }
+    }
+  };
+  await sendMessage(to, payload);
+}
+
 // ==================== BUG FIX #3 ====================
 // Original: id.replace("edit_", "").replace("_", " ") mangled labels
 // like "edit_nationalid" -> "nationalid" (no underscore to replace).
@@ -599,7 +796,10 @@ const MENU_BACK_MAP = {
   emergency_loan_menu: (to, session) => sendMainMenu(to, session),          // Emergency Loan submenu -> Civil Servants Menu
   loan_tenure_menu: (to, session) => sendEmergencyLoanMenu(to, session),    // Loan tenure list (Select Period) -> Emergency Loan submenu
   loan_amount_menu: (to, session) => sendLoanTenureOptions(to, session),    // Loan Amount menu -> Select Period page
-  loan_breakdown_menu: (to, session) => sendLoanAmountMenu(to, session)     // Loan breakdown -> Loan Amount menu
+  loan_breakdown_menu: (to, session) => sendLoanAmountMenu(to, session),    // Loan breakdown -> Loan Amount menu
+  approve_loan_details_menu: (to, session) => sendEmergencyLoanMenu(to, session), // Approve Loan details -> Emergency Loan submenu
+  pay_loan_menu: (to, session) => sendEmergencyLoanMenu(to, session),       // Pay Loan options -> Emergency Loan submenu
+  pay_loan_confirm_menu: (to, session) => sendPayLoanOptions(to, session)   // Pay Loan confirm -> Pay Loan options
 };
 
 // ==================== HANDLERS ====================
@@ -675,6 +875,16 @@ async function handleButton(to, id, session) {
     await sendEmergencyLoanMenu(to, session);
   }
   else if (id === "apply_loan") {
+    const existingLoan = currentLoans[to];
+    if (existingLoan && (existingLoan.status === "pending_approval" || existingLoan.status === "approved")) {
+      // Defensive: sendEmergencyLoanMenu already hides "Apply Loan" while
+      // a loan is active, so this should only fire on a stale/replayed
+      // button tap. Confirmed rule: no new applications until the
+      // current loan is fully repaid.
+      await sendTextMessage(to, "You already have an active loan. Please complete or repay it before applying for a new one.");
+      await sendEmergencyLoanMenu(to, session);
+      return;
+    }
     await sendLoanTenureOptions(to, session);
   }
   else if (LOAN_TENURE_OPTIONS[id]) {
@@ -704,6 +914,74 @@ async function handleButton(to, id, session) {
     delete session.loanBreakdown;
     await sendTextMessage(to, "Loan application declined.");
     await sendEmergencyLoanMenu(to, session);
+  }
+  // ==================== APPROVE LOAN ====================
+  else if (id === "approve_loan_menu") {
+    const loan = currentLoans[to];
+    if (!loan || loan.status !== "pending_approval") {
+      await sendTextMessage(to, "There's no pending loan application to approve.");
+      await sendEmergencyLoanMenu(to, session);
+      return;
+    }
+    await sendApproveLoanDetails(to, session);
+  }
+  else if (id === "confirm_approve_loan") {
+    session.step = "enter_approval_payroll_number";
+    await sendTextMessage(to, "Enter Payroll Number:");
+  }
+  // ==================== CANCEL LOAN ====================
+  else if (id === "cancel_loan") {
+    await sendCancelLoanConfirm(to, session);
+  }
+  else if (id === "cancel_loan_yes") {
+    delete currentLoans[to];
+    await sendTextMessage(to, "Your loan application has been successfully cancelled.");
+    await sendWelcome(to);
+  }
+  else if (id === "cancel_loan_no") {
+    // Returns to the pending-loan menu (Approve Loan / Cancel Loan), per spec.
+    await sendEmergencyLoanMenu(to, session);
+  }
+  // ==================== PAY LOAN (EARLY REPAYMENT) ====================
+  else if (id === "pay_loan_menu") {
+    const loan = currentLoans[to];
+    if (!loan || loan.status !== "approved") {
+      await sendTextMessage(to, "There's no active loan to pay.");
+      await sendEmergencyLoanMenu(to, session);
+      return;
+    }
+    await sendPayLoanOptions(to, session);
+  }
+  else if (id.startsWith("pay_installments_")) {
+    const installments = parseInt(id.replace("pay_installments_", ""), 10);
+    await sendPayLoanConfirm(to, session, installments);
+  }
+  else if (id === "proceed_payment") {
+    const loan = currentLoans[to];
+    const installments = session.pendingPaymentInstallments;
+
+    if (!loan || !installments) {
+      await sendTextMessage(to, "That payment session has expired. Let's start again.");
+      await sendEmergencyLoanMenu(to, session);
+      return;
+    }
+
+    const payAmount = loan.breakdown.monthlyInstallment * installments;
+    const stkResult = await triggerMpesaStkPush(to, payAmount);
+
+    if (!stkResult.success) {
+      await sendTextMessage(to, "Payment could not be processed. Please try again.");
+      return;
+    }
+
+    loan.installmentsPaid += installments;
+    if (loan.installmentsPaid >= loan.tenureMonths) {
+      loan.status = "paid";
+    }
+    delete session.pendingPaymentInstallments;
+
+    await sendTextMessage(to, "Thank you for using MyMobi.");
+    await sendMainMenu(to, session);
   }
   else if (id === "get_payslip") {
     await sendTextMessage(to, "You selected Get Payslip. (Feature coming soon)");
@@ -833,30 +1111,109 @@ async function handleTextInput(to, text, session) {
 
     session.payrollNumber = cleanText;
 
-    // Record the submitted application (mirrors registeredUsers pattern)
-    // for whatever admin/backend process picks these up later.
-    if (!loanApplications[to]) loanApplications[to] = [];
-    loanApplications[to].push({
+    const refNo = generateLoanRefNo();
+    const approvalCode = generateApprovalCode(); // TODO: real backend will generate/send this via SMS
+    const dueDate = computeDueDate(session.loanTenureMonths);
+
+    // This becomes the user's CURRENT loan — drives what the Emergency
+    // Loan menu shows from now on (Approve Loan / Cancel Loan, until
+    // resolved).
+    currentLoans[to] = {
       loanAmount: session.loanAmount,
       tenureMonths: session.loanTenureMonths,
       breakdown: session.loanBreakdown,
       payrollNumber: session.payrollNumber,
-      submittedAt: new Date().toISOString(),
-      status: "submitted"
-    });
-    console.log(`Loan application submitted by ${to}: KES ${session.loanAmount} over ${session.loanTenureMonths} month(s)`);
+      refNo: refNo,
+      approvalCode: approvalCode,
+      approvalCodeAttempts: 0,
+      dueDate: dueDate,
+      status: "pending_approval",
+      installmentsPaid: 0,
+      submittedAt: new Date().toISOString()
+    };
+
+    // Also keep a permanent audit trail of every application ever made.
+    if (!loanApplications[to]) loanApplications[to] = [];
+    loanApplications[to].push({ ...currentLoans[to] });
+
+    console.log(`Loan application submitted by ${to}: KES ${session.loanAmount} over ${session.loanTenureMonths} month(s), Ref ${refNo}, approval code ${approvalCode} (simulated)`);
 
     await sendTextMessage(to, "Your loan request has been submitted. Please wait for an SMS from MyMobi.");
 
-    // Clean up loan-specific session fields now that the application is
-    // recorded, then return to the main menu.
+    // Clean up loan-application session fields — the durable state now
+    // lives in currentLoans[to], not the session.
     delete session.loanTenureMonths;
     delete session.loanLimit;
     delete session.loanAmount;
     delete session.loanBreakdown;
     delete session.payrollNumber;
 
-    await sendMainMenu(to, session);
+    // TODO: remove this simulated delivery once the real backend sends
+    // the approval code via SMS. For now, it arrives as a separate
+    // WhatsApp message 5 seconds after submission so the flow can be
+    // tested end-to-end without checking server logs. The Emergency
+    // Loan menu (Approve Loan / Cancel Loan) is only shown AFTER the
+    // code arrives, not before. Fire-and-forget: errors here shouldn't
+    // affect the rest of the submission flow.
+    setTimeout(async () => {
+      try {
+        await sendTextMessage(to, `Approval Code ${approvalCode}`);
+        await sendEmergencyLoanMenu(to, session);
+      } catch (err) {
+        // Ignore errors in this simulated delayed delivery
+      }
+    }, 5000);
+
+    return;
+  }
+
+  // =====================================================
+  // APPROVE LOAN: PAYROLL NUMBER + APPROVAL CODE
+  // =====================================================
+  if (step === "enter_approval_payroll_number") {
+    if (!cleanText) {
+      await sendTextMessage(to, "Please enter your Payroll Number.");
+      return;
+    }
+    session.approvalPayrollNumber = cleanText;
+    session.step = "enter_approval_code";
+    await sendTextMessage(to, "Enter Approval Code:");
+    return;
+  }
+
+  if (step === "enter_approval_code") {
+    const loan = currentLoans[to];
+
+    if (!loan || loan.status !== "pending_approval") {
+      await sendTextMessage(to, "That loan application is no longer pending. Let's start again.");
+      await sendEmergencyLoanMenu(to, session);
+      return;
+    }
+
+    if (!/^\d{6}$/.test(cleanText)) {
+      await sendTextMessage(to, "Invalid code. Please enter the 6-digit approval code.");
+      return;
+    }
+
+    if (cleanText === loan.approvalCode) {
+      loan.status = "approved";
+      loan.approvedAt = new Date().toISOString();
+      delete session.approvalPayrollNumber;
+
+      await sendTextMessage(to, "Your loan approval has been received and is being processed. Please wait for an SMS notification from MyMobi.");
+      await sendMainMenu(to, session);
+    } else {
+      loan.approvalCodeAttempts = (loan.approvalCodeAttempts || 0) + 1;
+
+      if (loan.approvalCodeAttempts >= 3) {
+        await sendTextMessage(to, "Too many incorrect attempts. Please try again later.");
+        delete session.approvalPayrollNumber;
+        await sendEmergencyLoanMenu(to, session);
+      } else {
+        const attemptsLeft = 3 - loan.approvalCodeAttempts;
+        await sendTextMessage(to, `Incorrect code. You have ${attemptsLeft} attempt(s) remaining.`);
+      }
+    }
     return;
   }
 
