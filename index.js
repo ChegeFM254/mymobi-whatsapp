@@ -295,6 +295,15 @@ async function sendRegistrationComplete(to, session) {
         };
         console.log(`User registered: ${session.mobileNumber}`);
     }
+
+    // Clear sensitive/one-time session data up front, so even if a send
+    // below fails, the session isn't left dangling on "confirm_new_pin"
+    // waiting to time out.
+    if (userSessions[to]) {
+        delete userSessions[to].otp;
+        delete userSessions[to].newPin;
+    }
+
     await sendTextMessage(to,
         "🎉 Registration Complete!\n\n" +
         "Your account has been successfully set up.\n\n" +
@@ -305,11 +314,6 @@ async function sendRegistrationComplete(to, session) {
         "• You can change your PIN later from the app settings"
     );
   await sendMainMenu(to);
-
-    if (userSessions[to]) {
-        delete userSessions[to].otp;
-        delete userSessions[to].newPin;
-    }
 }
 
 // ==================== BUG FIX #2 (new function) ====================
@@ -327,17 +331,18 @@ async function sendPinResetComplete(to, session) {
     user.status = "active";
     console.log(`PIN reset for user: ${to}`);
   }
-  await sendTextMessage(to,
-    "✅ Your PIN has been updated successfully.\n\n" +
-    "🔒 Do not share this PIN with anyone."
-  );
-  await sendMainMenu(to);
 
   if (userSessions[to]) {
     delete userSessions[to].otp;
     delete userSessions[to].newPin;
     delete userSessions[to].isPinReset;
   }
+
+  await sendTextMessage(to,
+    "✅ Your PIN has been updated successfully.\n\n" +
+    "🔒 Do not share this PIN with anyone."
+  );
+  await sendMainMenu(to);
 }
 
 async function sendMainMenu(to) {
@@ -751,13 +756,91 @@ async function sendTextMessage(to, text) {
   await sendMessage(to, payload);
 }
 
-async function sendMessage(to, payload) {
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ==================== OUTBOUND MESSAGE QUEUE (BUG FIX #5, rebuilt) ====================
+// WhatsApp enforces a per-(business number, recipient) throttle. If two
+// messages to the same person land too close together — even a hand-tuned
+// 1.5s gap inserted at one call site — it can still trip error 131056,
+// especially once several messages have already gone out in the same
+// short test session, and it's easy to miss a call site when delays are
+// scattered by hand through the code (as happened above).
+//
+// Instead, every outbound message is funneled through ONE queue per
+// recipient. The queue:
+//   1. Sends messages to a given recipient strictly one at a time.
+//   2. Enforces a minimum gap since the last successful send to that
+//      recipient, enforced centrally — no per-call-site sleep() needed.
+//   3. Automatically retries with exponential backoff specifically when
+//      WhatsApp responds with a rate-limit error (131056 or 130429),
+//      instead of silently dropping the message and leaving the session
+//      stuck (which is what caused "Registration Complete" to vanish).
+//
+// This is the single place that governs message pacing — nowhere else
+// in the code should call axios directly or add its own delays.
+
+const MIN_GAP_MS = 3000;          // minimum spacing between messages to the same recipient
+const MAX_SEND_RETRIES = 4;
+const BASE_RETRY_DELAY_MS = 4000; // doubles each retry: 4s, 8s, 16s, 32s
+
+const recipientQueues = new Map(); // "to" phone number -> { tail: Promise, lastSentAt: number }
+
+// Prevent recipientQueues from growing forever on a long-running server —
+// numbers that haven't messaged in a while are safe to forget, since a
+// fresh entry is created automatically the next time they do.
+const QUEUE_ENTRY_TTL_MS = 60 * 60 * 1000; // 1 hour
+setInterval(() => {
+  const now = Date.now();
+  for (const [to, state] of recipientQueues) {
+    if (now - state.lastSentAt > QUEUE_ENTRY_TTL_MS) {
+      recipientQueues.delete(to);
+    }
+  }
+}, 15 * 60 * 1000); // sweep every 15 minutes
+
+function sendMessage(to, payload) {
+  const state = recipientQueues.get(to) || { tail: Promise.resolve(), lastSentAt: 0 };
+
+  const task = state.tail
+    .catch(() => {}) // never let a prior failure break the chain for this recipient
+    .then(async () => {
+      const elapsed = Date.now() - state.lastSentAt;
+      if (elapsed < MIN_GAP_MS) {
+        await sleep(MIN_GAP_MS - elapsed);
+      }
+      await sendWithRetry(to, payload);
+      state.lastSentAt = Date.now();
+    });
+
+  state.tail = task;
+  recipientQueues.set(to, state);
+  return task;
+}
+
+async function sendWithRetry(to, payload, attempt = 0) {
   try {
     await axios.post(`https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`, payload, {
       headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
     });
   } catch (err) {
+    const errorCode = err.response?.data?.error?.code;
+    const isRateLimitError = errorCode === 131056 || errorCode === 130429;
+
+    if (isRateLimitError && attempt < MAX_SEND_RETRIES) {
+      const delay = BASE_RETRY_DELAY_MS * Math.pow(2, attempt);
+      console.warn(`Rate limited sending to ${to} (code ${errorCode}). Retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_SEND_RETRIES})`);
+      await sleep(delay);
+      return sendWithRetry(to, payload, attempt + 1);
+    }
+
     console.error("Send failed:", err.response?.data || err.message);
+    // Deliberately not re-thrown: a failed send (after retries) shouldn't
+    // crash the webhook handler. Session state for this bot is already
+    // updated in memory before messages are sent (see
+    // sendRegistrationComplete / sendPinResetComplete), so a delivery
+    // failure doesn't strand a user in an inconsistent step.
   }
 }
 
