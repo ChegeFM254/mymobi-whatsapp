@@ -1,7 +1,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
-const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,34 +14,18 @@ app.use(bodyParser.json());
 const userSessions = {};
 const registeredUsers = {};
 
-// ==================== HELPER FUNCTIONS ====================
+// 60-second inactivity timeout
 function resetTimeout(from) {
   if (userSessions[from] && userSessions[from].timeoutId) {
     clearTimeout(userSessions[from].timeoutId);
   }
+
   userSessions[from].timeoutId = setTimeout(() => {
     delete userSessions[from];
     sendTextMessage(from, "⏰ Your session has timed out due to inactivity.").catch(() => {});
-  }, 300000); // 5 minutes
+  }, 60000);
 }
 
-function hasPendingLoan(user) {
-  return user && user.loans && user.loans.some(loan => loan.status === "Pending");
-}
-
-function hasApprovedLoan(user) {
-  return user && user.loans && user.loans.some(loan => loan.status === "Approved");
-}
-
-function getPendingLoan(user) {
-  return user && user.loans ? user.loans.find(loan => loan.status === "Pending") : null;
-}
-
-function getApprovedLoan(user) {
-  return user && user.loans ? user.loans.find(loan => loan.status === "Approved") : null;
-}
-
-// ==================== WEBHOOK ====================
 app.get('/webhook', (req, res) => {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
     res.send(req.query['hub.challenge']);
@@ -252,7 +235,12 @@ async function sendRegistrationComplete(to, session) {
 
   await sendTextMessage(to, 
     "🎉 Registration Complete!\n\n" +
-    "Your account has been successfully set up."
+    "Your account has been successfully set up.\n\n" +
+    "🔒 Security Notice:\n" +
+    "• Your PIN is now active\n" +
+    "• Do not share this PIN with anyone\n" +
+    "• For your protection, we strongly recommend deleting this chat or the messages containing your PIN\n" +
+    "• You can change your PIN later from the app settings"
   );
 
   await sendMainMenu(to);
@@ -263,23 +251,7 @@ async function sendRegistrationComplete(to, session) {
   }
 }
 
-// ==================== UPDATED sendMainMenu ====================
 async function sendMainMenu(to) {
-  const user = registeredUsers[to];
-  const hasCurrentLoan = user && (hasPendingLoan(user) || hasApprovedLoan(user));
-
-  let rows = [
-    { id: "get_payslip", title: "Get Payslip", description: "Download your payslip" },
-    { id: "home", title: "Home", description: "Return to home" },
-    { id: "logout", title: "Logout", description: "Log out of the app" }
-  ];
-
-  if (!hasCurrentLoan) {
-    rows.unshift({ id: "emergency_loan", title: "Emergency Loan", description: "Apply for emergency loan" });
-  } else if (hasApprovedLoan(user) && !hasPendingLoan(user)) {
-    rows.unshift({ id: "pay_loan", title: "Pay Loan", description: "Make a repayment" });
-  }
-
   const payload = {
     messaging_product: "whatsapp",
     to: to,
@@ -293,74 +265,11 @@ async function sendMainMenu(to) {
         button: "Select Option",
         sections: [{
           title: "Options",
-          rows: rows
-        }]
-      }
-    }
-  };
-  await sendMessage(to, payload);
-}
-
-// ==================== NEW EMERGENCY LOAN SCREENS ====================
-
-async function sendEmergencyLoanSubMenu(to) {
-  const user = registeredUsers[to];
-  const hasPending = hasPendingLoan(user);
-
-  let rows = hasPending 
-    ? [
-        { id: "approve_loan", title: "Approve Loan", description: "Approve your pending loan" },
-        { id: "cancel_loan", title: "Cancel Loan", description: "Cancel your application" },
-        { id: "home", title: "Home", description: "Return to Main Menu" },
-        { id: "logout", title: "Logout", description: "Log out of the app" }
-      ]
-    : [
-        { id: "apply_loan", title: "Apply Loan", description: "Request a new emergency loan" },
-        { id: "approve_loan", title: "Approve Loan", description: "Approve your loan" },
-        { id: "pay_loan", title: "Pay Loan", description: "Make a repayment" },
-        { id: "home", title: "Home", description: "Return to Main Menu" },
-        { id: "logout", title: "Logout", description: "Log out of the app" }
-      ];
-
-  const payload = {
-    messaging_product: "whatsapp",
-    to: to,
-    type: "interactive",
-    interactive: {
-      type: "list",
-      header: { type: "text", text: "Emergency Loan" },
-      body: { text: "What would you like to do?" },
-      footer: { text: "MyMobi" },
-      action: {
-        button: "Select Option",
-        sections: [{
-          title: "Options",
-          rows: rows
-        }]
-      }
-    }
-  };
-  await sendMessage(to, payload);
-}
-
-async function sendPostSubmissionSubMenu(to) {
-  const payload = {
-    messaging_product: "whatsapp",
-    to: to,
-    type: "interactive",
-    interactive: {
-      type: "list",
-      header: { type: "text", text: "Emergency Loan" },
-      body: { text: "What would you like to do?" },
-      footer: { text: "MyMobi" },
-      action: {
-        button: "Select Option",
-        sections: [{
-          title: "Options",
           rows: [
-            { id: "approve_loan", title: "Approve Loan", description: "Approve your submitted loan" },
-            { id: "cancel_loan", title: "Cancel Loan", description: "Cancel your application" },
-            { id: "home", title: "Home", description: "Return to Main Menu" },
+            { id: "emergency_loan", title: "Emergency Loan", description: "Apply for emergency loan" },
+            { id: "get_payslip", title: "Get Payslip", description: "Download your payslip" },
+            { id: "back", title: "Back", description: "Go back" },
+            { id: "home", title: "Home", description: "Return to home" },
             { id: "logout", title: "Logout", description: "Log out of the app" }
           ]
         }]
@@ -373,9 +282,14 @@ async function sendPostSubmissionSubMenu(to) {
 // ==================== HANDLERS ====================
 
 async function handleButton(to, id, session) {
-  const user = registeredUsers[to];
-
   if (id === "civil_servants") {
+    const user = registeredUsers[to];
+
+    if (user && user.status === "blocked") {
+      await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
+      return;
+    }
+
     if (user && user.status === "active") {
       session.step = "auth_menu";
       await sendAuthMenu(to);
@@ -384,60 +298,14 @@ async function handleButton(to, id, session) {
       await sendOptIn(to);
     }
   }
-  else if (id === "emergency_loan") {
-    await sendEmergencyLoanSubMenu(to);
-  }
-  else if (id === "apply_loan") {
-    if (user && (hasPendingLoan(user) || hasApprovedLoan(user))) {
-      await sendTextMessage(to, "You already have a Current Loan");
-      await sendMainMenu(to);
-    } else {
-      session.step = "loan_period";
-      await sendLoanPeriodOptions(to);
-    }
-  }
-  else if (id === "approve_loan") {
-    const pendingLoan = getPendingLoan(user);
-    if (!pendingLoan) {
-      await sendTextMessage(to, "You don't have any pending loan to approve.");
-      await sendEmergencyLoanSubMenu(to);
-      return;
-    }
-    session.currentLoan = pendingLoan;
-    session.step = "approve_payroll";
-    await sendTextMessage(to, `You are about to approve ${pendingLoan.periodMonths}-month loan of KES ${pendingLoan.amount}`);
-    await sendTextMessage(to, "Please enter your Payroll Number:");
-  }
-  else if (id === "cancel_loan") {
-    const pendingLoan = getPendingLoan(user);
-    if (!pendingLoan) {
-      await sendTextMessage(to, "No pending loan to cancel.");
-      await sendEmergencyLoanSubMenu(to);
-      return;
-    }
-    session.currentLoan = pendingLoan;
-    session.step = "cancel_confirm";
-    await sendTextMessage(to, "Are you sure you want to cancel your loan application? (Yes/No)");
-  }
-  else if (id === "pay_loan") {
-    const approvedLoan = getApprovedLoan(user);
-    if (!approvedLoan) {
-      await sendTextMessage(to, "You don't have any approved loan.");
-      await sendMainMenu(to);
-      return;
-    }
-    session.currentLoan = approvedLoan;
-    session.step = "pay_installment";
-    await sendTextMessage(to, "Pay Loan feature is under development.");
-  }
   else if (id === "enter_pin") {
     session.step = "enter_pin";
-    await sendTextMessage(to, "Enter your 5-digit PIN:");
+    await sendTextMessage(to, "Enter your PIN:");
   }
   else if (id === "forgot_pin") {
     session.step = "forgot_pin";
-    session.otp = "67890";
     await sendTextMessage(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
+    session.otp = "67890";
   }
   else if (id === "opt_out") {
     session.step = "opt_out_confirmation";
@@ -475,127 +343,115 @@ async function handleButton(to, id, session) {
     if (fieldName === "mobilenumber") fieldName = "Mobile Number (Mpesa)";
     await sendTextMessage(to, `Enter new ${fieldName}:`);
   }
+  else if (id === "emergency_loan") {
+    await sendTextMessage(to, "You selected Emergency Loan. (Feature coming soon)");
+  } 
   else if (id === "get_payslip") {
-    await sendTextMessage(to, "Get Payslip feature coming soon.");
-    await sendMainMenu(to);
+    await sendTextMessage(to, "You selected Get Payslip. (Feature coming soon)");
   } 
   else if (id === "back" || id === "home") {
-    await sendMainMenu(to);
+    await sendWelcome(to);
   } 
   else if (id === "logout") {
-    session.step = "logout_confirm";
-    await sendTextMessage(to, "Are you sure you want to log out? (Yes/No)");
+    await sendTextMessage(to, "You have been logged out.");
+    delete userSessions[to];
   }
 }
-
-// ==================== TEXT INPUT ====================
 
 async function handleTextInput(to, text, session) {
   const cleanText = text.trim();
   const step = session.step;
-  const user = registeredUsers[to];
 
-  // ==================== NEW LOAN FLOWS ====================
-  if (step === "approve_payroll") {
-    session.payrollNumber = cleanText;
-    session.step = "approve_code";
-
-    const approvalCode = Math.floor(100000 + Math.random() * 900000).toString();
-    session.approvalCode = approvalCode;
-    session.approvalCodeExpiry = Date.now() + (72 * 60 * 60 * 1000);
-
-    const hashedCode = crypto.createHash('sha256').update(approvalCode).digest('hex');
-    if (session.currentLoan) session.currentLoan.approvalCodeHash = hashedCode;
-
-    await sendTextMessage(to, `Your approval code is: **${approvalCode}** (Valid for 72 hours)`);
-    await sendTextMessage(to, "Please enter the 6-digit Approval Code:");
-    return;
-  }
-
-  if (step === "approve_code") {
-    if (cleanText === session.approvalCode) {
-      if (session.currentLoan) session.currentLoan.status = "Approved";
-      await sendTextMessage(to, "Your loan approval has been received and is being processed. Please wait for an SMS notification from MyMobi.");
-      await sendMainMenu(to);
-    } else {
-      await sendTextMessage(to, "Invalid approval code. Please try again.");
-    }
-    return;
-  }
-
-  if (step === "cancel_confirm") {
-    if (cleanText.toLowerCase() === "yes") {
-      if (session.currentLoan) session.currentLoan.status = "Cancelled";
-      await sendTextMessage(to, "Your loan application has been successfully cancelled.");
-      await sendEmergencyLoanSubMenu(to);
-    } else {
-      await sendEmergencyLoanSubMenu(to);
-    }
-    return;
-  }
-
-  // ==================== ORIGINAL KYC + REGISTRATION + AUTH ====================
+  // KYC DATA COLLECTION
   if (["first_name", "last_name", "upn", "national_id", "mobile_number"].includes(step)) {
     if (step === "first_name") {
-      if (!cleanText) { await sendTextMessage(to, "Please enter your First Name."); return; }
+      if (!cleanText) {
+        await sendTextMessage(to, "Please enter your First Name.");
+        return;
+      }
       session.firstName = cleanText;
       session.step = "last_name";
       await sendTextMessage(to, "Enter your Last Name");
       return;
     }
+
     if (step === "last_name") {
-      if (!cleanText) { await sendTextMessage(to, "Please enter your Last Name."); return; }
+      if (!cleanText) {
+        await sendTextMessage(to, "Please enter your Last Name.");
+        return;
+      }
       session.lastName = cleanText;
       session.step = "upn";
       await sendTextMessage(to, "Enter UPN");
       return;
     }
+
     if (step === "upn") {
-      if (!cleanText) { await sendTextMessage(to, "Please enter your UPN."); return; }
+      if (!cleanText) {
+        await sendTextMessage(to, "Please enter your UPN.");
+        return;
+      }
       session.upn = cleanText;
       session.step = "national_id";
       await sendTextMessage(to, "Enter National ID Number");
       return;
     }
+
     if (step === "national_id") {
-      if (!cleanText) { await sendTextMessage(to, "Please enter your National ID Number."); return; }
+      if (!cleanText) {
+        await sendTextMessage(to, "Please enter your National ID Number.");
+        return;
+      }
       session.nationalId = cleanText;
       session.step = "mobile_number";
       await sendTextMessage(to, "Enter Mobile Number (Mpesa)");
       return;
     }
+
     if (step === "mobile_number") {
-      if (!cleanText) { await sendTextMessage(to, "Please enter your Mobile Number (Mpesa)."); return; }
+      if (!cleanText) {
+        await sendTextMessage(to, "Please enter your Mobile Number (Mpesa).");
+        return;
+      }
       session.mobileNumber = cleanText;
       await sendConfirmation(to, session);
       return;
     }
   }
 
+  // EDIT FLOW
   if (step.startsWith("edit_")) {
-    if (!cleanText) { await sendTextMessage(to, "Please enter a valid value."); return; }
+    if (!cleanText) {
+      await sendTextMessage(to, "Please enter a valid value.");
+      return;
+    }
+
     const field = step.replace("edit_", "");
     if (field === "firstname") session.firstName = cleanText;
     if (field === "lastname") session.lastName = cleanText;
     if (field === "upn") session.upn = cleanText;
     if (field === "nationalid") session.nationalId = cleanText;
     if (field === "mobilenumber") session.mobileNumber = cleanText;
+
     await sendConfirmation(to, session);
     return;
   }
 
+  // REGISTRATION: OTP + PIN SETUP
   if (step === "enter_otp") {
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
       return;
     }
+
     if (cleanText === session.otp) {
       session.step = "enter_new_pin";
       await sendEnterNewPIN(to);
     } else {
       session.otpAttempts = (session.otpAttempts || 0) + 1;
+
       if (session.otpAttempts >= 3) {
-        await sendTextMessage(to, "Too many incorrect attempts.");
+        await sendTextMessage(to, "Too many incorrect attempts. Your PIN has been deactivated. Please try again after 30 minutes.");
         delete userSessions[to];
       } else {
         await sendTextMessage(to, `Incorrect OTP. You have ${3 - session.otpAttempts} attempt(s) remaining.`);
@@ -609,10 +465,12 @@ async function handleTextInput(to, text, session) {
       await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
       return;
     }
+
     if (cleanText === session.otp) {
-      await sendTextMessage(to, "Your new PIN cannot be the same as the OTP.");
+      await sendTextMessage(to, "Your new PIN cannot be the same as the OTP. Please choose a different 5-digit PIN.");
       return;
     }
+
     session.newPin = cleanText;
     session.step = "confirm_new_pin";
     await sendConfirmNewPIN(to);
@@ -623,20 +481,33 @@ async function handleTextInput(to, text, session) {
     if (cleanText === session.newPin) {
       await sendRegistrationComplete(to, session);
     } else {
-      await sendTextMessage(to, "The PINs do not match. Please try again.");
+      await sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
       session.step = "enter_new_pin";
     }
     return;
   }
 
+  // RETURNING USER: ENTER PIN + VERIFICATION CODE
   if (step === "enter_pin") {
-    if (!cleanText) { await sendTextMessage(to, "Please enter your 5-digit PIN."); return; }
-    if (!/^\d{5}$/.test(cleanText)) { await sendTextMessage(to, "Invalid PIN."); return; }
+    if (!cleanText) {
+      await sendTextMessage(to, "Please enter your 5-digit PIN.");
+      return;
+    }
+
+    if (!/^\d{5}$/.test(cleanText)) {
+      await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+      return;
+    }
 
     const user = registeredUsers[to];
-    if (!user) { await sendTextMessage(to, "User not found."); return; }
+
+    if (!user) {
+      await sendTextMessage(to, "User not found. Please register first.");
+      return;
+    }
+
     if (user.status === "blocked") {
-      await sendTextMessage(to, "Your account is blocked.");
+      await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
       return;
     }
 
@@ -646,11 +517,13 @@ async function handleTextInput(to, text, session) {
       await sendTextMessage(to, "Enter Verification Code:");
     } else {
       user.failedPinAttempts = (user.failedPinAttempts || 0) + 1;
+
       if (user.failedPinAttempts >= 3) {
         user.status = "blocked";
-        await sendTextMessage(to, "Your account is blocked.");
+        await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
       } else {
-        await sendTextMessage(to, `Incorrect PIN. You have ${3 - user.failedPinAttempts} attempt(s) remaining.`);
+        const attemptsLeft = 3 - user.failedPinAttempts;
+        await sendTextMessage(to, `Incorrect PIN. You have ${attemptsLeft} attempt(s) remaining.`);
       }
     }
     return;
@@ -658,68 +531,76 @@ async function handleTextInput(to, text, session) {
 
   if (step === "enter_verification_code") {
     const verificationCode = "67890";
+
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid code.");
+      await sendTextMessage(to, "Invalid code. Please enter a 5-digit verification code.");
       return;
     }
+
     if (cleanText === verificationCode) {
       await sendTextMessage(to, "Verification successful!");
       await sendMainMenu(to);
     } else {
       session.verificationAttempts = (session.verificationAttempts || 0) + 1;
+
       if (session.verificationAttempts >= 3) {
-        await sendTextMessage(to, "Too many incorrect attempts.");
+        await sendTextMessage(to, "Too many incorrect attempts. Please start again.");
         session.step = "enter_pin";
+        await sendTextMessage(to, "Enter your 5-digit PIN:");
       } else {
-        await sendTextMessage(to, `Incorrect code. You have ${3 - session.verificationAttempts} attempt(s) remaining.`);
+        const attemptsLeft = 3 - session.verificationAttempts;
+        await sendTextMessage(to, `Incorrect code. You have ${attemptsLeft} attempt(s) remaining.`);
       }
     }
     return;
   }
 
+  // FORGOT PIN
   if (step === "forgot_pin") {
     if (!/^\d{5}$/.test(cleanText)) {
-      await sendTextMessage(to, "Invalid OTP.");
+      await sendTextMessage(to, "Invalid OTP. Please enter a 5-digit OTP.");
       return;
     }
+
     if (cleanText === session.otp) {
       session.step = "enter_new_pin";
       await sendTextMessage(to, "OTP verified. Please create a new 5-digit PIN:");
     } else {
-      await sendTextMessage(to, "Incorrect OTP.");
+      await sendTextMessage(to, "Incorrect OTP. Please try again.");
     }
     return;
   }
 
+  // OPT OUT
   if (step === "opt_out_confirmation") {
     const response = cleanText.toLowerCase();
+
     if (response === "yes" || response === "y") {
       session.step = "opt_out_pin";
       await sendTextMessage(to, "To confirm opt out, please enter your 5-digit PIN:");
-    } else {
+    } else if (response === "no" || response === "n") {
+      await sendTextMessage(to, "Opt out cancelled.");
       await sendAuthMenu(to);
+    } else {
+      await sendTextMessage(to, "Please reply with Yes or No.");
     }
     return;
   }
 
   if (step === "opt_out_pin") {
     const user = registeredUsers[to];
-    if (user && cleanText === user.pin) {
+
+    if (!user) {
+      await sendTextMessage(to, "User not found.");
+      return;
+    }
+
+    if (cleanText === user.pin) {
       user.status = "opted_out";
       delete user.pin;
-      await sendTextMessage(to, "You have been successfully opted out.");
+      await sendTextMessage(to, "You have been successfully opted out of the Emergency Loan service.");
     } else {
       await sendTextMessage(to, "Incorrect PIN. Opt out cancelled.");
-    }
-    return;
-  }
-
-  if (step === "logout_confirm") {
-    if (cleanText.toLowerCase() === "yes") {
-      await sendTextMessage(to, "You have been logged out.");
-      delete userSessions[to];
-    } else {
-      await sendMainMenu(to);
     }
     return;
   }
