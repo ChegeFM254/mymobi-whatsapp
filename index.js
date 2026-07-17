@@ -247,7 +247,6 @@ async function sendRegistrationComplete(to, session) {
         };
         console.log(`User registered: ${session.mobileNumber}`);
     }
-
     await sendTextMessage(to, 
         "🎉 Registration Complete!\n\n" +
         "Your account has been successfully set up.\n\n" +
