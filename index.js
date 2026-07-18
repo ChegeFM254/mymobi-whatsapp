@@ -52,6 +52,9 @@ app.use(bodyParser.json({
     req.rawBody = buf;
   }
 }));
+// Needed for the document viewer's UPN entry form (a plain HTML <form>,
+// not JSON) — separate from the JSON parser used by the WhatsApp webhook.
+app.use(bodyParser.urlencoded({ extended: true }));
 
 // ==================== ITEM 4: SERVER-LEVEL RATE LIMITING ====================
 // Separate from the outbound message queue (which paces OUR replies to
@@ -156,6 +159,189 @@ const loanApplications = {}; // Key = WhatsApp number, Value = array of ALL subm
 //                                       -> "cancelled" (from pending_approval only)
 const currentLoans = {}; // Key = WhatsApp number, Value = current loan record
 
+// ==================== DOCUMENT DELIVERY (Payslip / Loan Statement / Loan Clearance) ====================
+// Generated documents are served via a short-lived link to a small,
+// separate web page (NOT part of the WhatsApp chat) that gates access
+// behind the person's UPN, per the product spec. Documents are HTML
+// pages, not real PDF files, for now — see the "PDF for now" TODO below.
+//
+// Key = random token (the last part of the link) -> {
+//   to, docType, upn (must match to unlock), html, createdAt
+// }
+// In-memory only, same caveat as every other data store in this app —
+// lost on restart. Entries expire after 24 hours either way.
+const documentStore = {};
+const DOCUMENT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const documentCleanupInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [token, doc] of Object.entries(documentStore)) {
+    if (now - doc.createdAt > DOCUMENT_TTL_MS) {
+      delete documentStore[token];
+    }
+  }
+}, 60 * 60 * 1000); // sweep hourly
+documentCleanupInterval.unref(); // see BUG FIX #10 note on the identical pattern above
+
+const DOCUMENT_COST_PER_UNIT = 23.20; // KES, per product spec — same rate for all three document types
+const LENDER_NAME = "MFS Technologies Limited"; // shown on Loan Statement and Loan Clearance Letter
+
+function generateDocumentToken() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let token = '';
+  for (let i = 0; i < 8; i++) token += chars[Math.floor(Math.random() * chars.length)];
+  return token;
+}
+
+// SECURITY: firstName/lastName are free-text with no format restriction
+// (unlike UPN/National ID, which are digits-only and therefore safe).
+// Without escaping, a malicious name could inject script content into
+// the document web page below — a stored XSS risk. Every piece of
+// user-controlled text gets run through this before going into HTML.
+function escapeHtml(value) {
+  if (value === undefined || value === null) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Base URL documents are served from. Render *usually* provides
+// RENDER_EXTERNAL_URL automatically for web services, but this isn't
+// guaranteed across every plan/configuration — so PUBLIC_BASE_URL can
+// be set explicitly to override it (recommended once you know your
+// real Render URL), falling back to Render's auto value, then to
+// localhost for local testing.
+const BASE_URL = process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${process.env.PORT || 3000}`;
+
+// ==================== DOCUMENT HTML TEMPLATES ====================
+// Per product decision: these are HTML pages standing in for real PDFs
+// for now (viewable, printable-to-PDF via the browser), not actual PDF
+// files — a real PDF library is a planned upgrade once this flow is
+// proven out end-to-end.
+function documentPageWrapper(title, bodyHtml) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeHtml(title)} - MyMobi</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; color: #222; line-height: 1.5; }
+  .header { border-bottom: 3px solid #0a7d3e; padding-bottom: 16px; margin-bottom: 24px; }
+  .header h1 { color: #0a7d3e; margin: 0 0 4px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  td, th { padding: 8px 12px; text-align: left; border-bottom: 1px solid #ddd; }
+  th { background: #f5f5f5; }
+  .total-row td { font-weight: bold; border-top: 2px solid #333; }
+  .footer { margin-top: 32px; font-size: 12px; color: #888; }
+  .notice { background: #fff8e1; border: 1px solid #ffe082; padding: 12px; border-radius: 6px; margin: 20px 0; font-size: 14px; }
+  button.download-btn { background: #0a7d3e; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 15px; cursor: pointer; }
+  @media print { .no-print { display: none; } }
+</style>
+</head>
+<body>
+  <div class="header"><h1>MyMobi</h1><p>${escapeHtml(title)}</p></div>
+  ${bodyHtml}
+  <div class="notice no-print">
+    📄 This is a placeholder document for testing (a downloadable PDF version is planned). Use your browser's Print option and choose "Save as PDF" to keep a copy.
+  </div>
+  <div class="no-print"><button class="download-btn" onclick="window.print()">Download / Print</button></div>
+  <div class="footer">Generated by MyMobi &middot; ${new Date().toISOString()}</div>
+</body>
+</html>`;
+}
+
+function generatePayslipHtml(user, months) {
+  // Placeholder/dummy figures — confirmed acceptable for now since no
+  // real payroll data exists anywhere in this system yet.
+  const basicSalary = 45000;
+  const allowances = 8000;
+  const grossPay = basicSalary + allowances;
+  const paye = 6200;
+  const nssf = 1080;
+  const shif = 1350;
+  const otherDeductions = 500;
+  const totalDeductions = paye + nssf + shif + otherDeductions;
+  const netPay = grossPay - totalDeductions;
+
+  let monthSections = '';
+  const now = new Date();
+  for (let i = 0; i < months; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const label = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    monthSections += `
+      <h3>${escapeHtml(label)}</h3>
+      <table>
+        <tr><th>Earnings</th><th>Amount (KES)</th></tr>
+        <tr><td>Basic Salary</td><td>${basicSalary.toLocaleString()}</td></tr>
+        <tr><td>Allowances</td><td>${allowances.toLocaleString()}</td></tr>
+        <tr><td><strong>Gross Pay</strong></td><td><strong>${grossPay.toLocaleString()}</strong></td></tr>
+        <tr><th>Deductions</th><th>Amount (KES)</th></tr>
+        <tr><td>PAYE</td><td>${paye.toLocaleString()}</td></tr>
+        <tr><td>NSSF</td><td>${nssf.toLocaleString()}</td></tr>
+        <tr><td>SHIF</td><td>${shif.toLocaleString()}</td></tr>
+        <tr><td>Other Deductions</td><td>${otherDeductions.toLocaleString()}</td></tr>
+        <tr class="total-row"><td>Net Pay</td><td>KES ${netPay.toLocaleString()}</td></tr>
+      </table>`;
+  }
+
+  const body = `
+    <p><strong>Name:</strong> ${escapeHtml(user.firstName)} ${escapeHtml(user.lastName)}<br>
+    <strong>UPN:</strong> ${escapeHtml(user.upn)}<br>
+    <strong>Period:</strong> Last ${months} month${months > 1 ? 's' : ''}</p>
+    <div class="notice">⚠️ Placeholder figures for testing — not real payroll data.</div>
+    ${monthSections}
+  `;
+  return documentPageWrapper('Payslip', body);
+}
+
+function generateLoanStatementHtml(user, loan) {
+  const { remainingBalance } = calculateLoanBalance(loan.breakdown.monthlyInstallment, loan.tenureMonths, loan.installmentsPaid);
+  const statusLabels = { pending_approval: 'Pending Approval', approved: 'Current (Active)', paid: 'Paid', cancelled: 'Cancelled' };
+  const statusLabel = statusLabels[loan.status] || loan.status;
+  const statementDate = new Date().toISOString().split('T')[0];
+
+  const body = `
+    <table>
+      <tr><td>Statement Date</td><td>${escapeHtml(statementDate)}</td></tr>
+      <tr><td>Lender</td><td>${escapeHtml(LENDER_NAME)}</td></tr>
+      <tr><td>First Name</td><td>${escapeHtml(user.firstName)}</td></tr>
+      <tr><td>Last Name</td><td>${escapeHtml(user.lastName)}</td></tr>
+      <tr><td>UPN</td><td>${escapeHtml(user.upn)}</td></tr>
+      <tr><td>Loan Principal</td><td>KES ${loan.loanAmount.toLocaleString()}</td></tr>
+      <tr><td>Installments Paid</td><td>${loan.installmentsPaid} of ${loan.tenureMonths}</td></tr>
+      <tr class="total-row"><td>Loan Balance</td><td>KES ${remainingBalance.toLocaleString()}</td></tr>
+      <tr><td>Loan Due Date</td><td>${escapeHtml(loan.dueDate)}</td></tr>
+      <tr><td>Loan Status</td><td>${escapeHtml(statusLabel)}</td></tr>
+    </table>
+  `;
+  return documentPageWrapper('Loan Statement', body);
+}
+
+function generateLoanClearanceHtml(user, loan) {
+  const { totalObligation, remainingBalance } = calculateLoanBalance(loan.breakdown.monthlyInstallment, loan.tenureMonths, loan.installmentsPaid);
+  const letterDate = new Date().toISOString().split('T')[0];
+
+  const body = `
+    <p>This is to certify that the below-named individual has fully repaid their loan facility with ${escapeHtml(LENDER_NAME)}.</p>
+    <table>
+      <tr><td>Letter Date</td><td>${escapeHtml(letterDate)}</td></tr>
+      <tr><td>Lender</td><td>${escapeHtml(LENDER_NAME)}</td></tr>
+      <tr><td>First Name</td><td>${escapeHtml(user.firstName)}</td></tr>
+      <tr><td>Last Name</td><td>${escapeHtml(user.lastName)}</td></tr>
+      <tr><td>UPN</td><td>${escapeHtml(user.upn)}</td></tr>
+      <tr><td>Loan Repayment Amount</td><td>KES ${totalObligation.toLocaleString()}</td></tr>
+      <tr class="total-row"><td>Loan Balance</td><td>KES ${remainingBalance.toLocaleString()}</td></tr>
+      <tr><td>Loan Due Date</td><td>${escapeHtml(loan.dueDate)}</td></tr>
+      <tr><td>Loan Status</td><td>Paid</td></tr>
+    </table>
+    <p>No further amounts are owed on this loan facility as of the date of this letter.</p>
+  `;
+  return documentPageWrapper('Loan Clearance Letter', body);
+}
+
 // Tenure options shown when a user starts a loan application. `limit` is
 // the maximum loan amount allowed for that repayment period, per the
 // product spec document.
@@ -249,6 +435,29 @@ function calculateLoanBalance(monthlyInstallment, tenureMonths, installmentsPaid
   return { totalObligation, remainingBalance };
 }
 
+// Per product decision: Loan Statement covers the current/active loan,
+// or the most recent one on record if there's no active loan right now.
+// Safe to use loanApplications as a fallback now that it stores object
+// REFERENCES (see the fix near loanApplications.push), not stale copies.
+function getRelevantLoanForStatement(to) {
+  if (currentLoans[to]) return currentLoans[to];
+  const history = loanApplications[to];
+  if (history && history.length > 0) return history[history.length - 1];
+  return null;
+}
+
+// Loan Clearance Letter is only valid for a fully PAID loan, per spec —
+// searches current loan first, then history, most recent first.
+function findMostRecentPaidLoan(to) {
+  if (currentLoans[to] && currentLoans[to].status === "paid") return currentLoans[to];
+  const history = loanApplications[to];
+  if (!history) return null;
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].status === "paid") return history[i];
+  }
+  return null;
+}
+
 // TODO: replace with a real Safaricom Daraja API STK Push integration
 // once it's available. For now, payment is simulated as immediately
 // successful so the Pay Loan flow can be built and tested end-to-end
@@ -320,6 +529,72 @@ app.get('/', (req, res) => {
 });
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', service: 'mymobi-whatsapp-bot' });
+});
+
+// ==================== DOCUMENT VIEWER (UPN-gated) ====================
+// A small, separate web page — NOT part of the WhatsApp chat — that a
+// Payslip/Loan Statement/Loan Clearance link points to. Per spec, access
+// is gated behind the person's UPN. Brute-force protection: the link is
+// permanently disabled after 5 wrong UPN attempts, requiring a fresh
+// link from WhatsApp rather than allowing unlimited guessing.
+function documentUpnFormPage(token, errorMessage, disableForm) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyMobi - Verify Your Identity</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; max-width: 420px; margin: 60px auto; padding: 0 20px; color: #222; text-align: center; }
+  h1 { color: #0a7d3e; }
+  input { width: 100%; padding: 10px; font-size: 16px; margin: 12px 0; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; }
+  button { background: #0a7d3e; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 16px; cursor: pointer; width: 100%; }
+  button:disabled { background: #aaa; cursor: not-allowed; }
+  .error { color: #b00020; margin: 12px 0; font-size: 14px; }
+</style>
+</head>
+<body>
+  <h1>MyMobi</h1>
+  <p>Please enter your UPN Number to access this document.</p>
+  ${errorMessage ? `<p class="error">${escapeHtml(errorMessage)}</p>` : ''}
+  <form method="POST" action="/documents/${escapeHtml(token)}">
+    <input type="text" name="upn" placeholder="Your UPN" inputmode="numeric" pattern="[0-9]*" required ${disableForm ? 'disabled' : ''}>
+    <button type="submit" ${disableForm ? 'disabled' : ''}>View Document</button>
+  </form>
+</body>
+</html>`;
+}
+
+app.get('/documents/:token', (req, res) => {
+  const doc = documentStore[req.params.token];
+  if (!doc) {
+    return res.status(404).send(documentUpnFormPage(req.params.token, 'This link is invalid or has expired. Please request a new one from WhatsApp.', true));
+  }
+  res.send(documentUpnFormPage(req.params.token, null, false));
+});
+
+app.post('/documents/:token', (req, res) => {
+  const doc = documentStore[req.params.token];
+  if (!doc) {
+    return res.status(404).send(documentUpnFormPage(req.params.token, 'This link is invalid or has expired. Please request a new one from WhatsApp.', true));
+  }
+
+  const enteredUpn = (req.body.upn || '').trim();
+
+  if (enteredUpn === doc.upn) {
+    logInfo('document_viewed', { token: req.params.token, docType: doc.docType, to: doc.to });
+    return res.send(doc.html);
+  }
+
+  doc.failedAttempts = (doc.failedAttempts || 0) + 1;
+  logWarn('document_upn_mismatch', { token: req.params.token, attempt: doc.failedAttempts });
+
+  if (doc.failedAttempts >= 5) {
+    delete documentStore[req.params.token];
+    return res.status(403).send(documentUpnFormPage(req.params.token, 'Too many incorrect attempts. This link has been disabled for your security. Please request a new one from WhatsApp.', true));
+  }
+
+  res.send(documentUpnFormPage(req.params.token, 'Incorrect UPN. Please try again.', false));
 });
 
 app.get('/webhook', (req, res) => {
@@ -715,7 +990,9 @@ async function sendMainMenu(to, session) {
                     title: "Options",
                     rows: [
                         { id: "emergency_loan", title: "Emergency Loan", description: emergencyLoanDescription },
-                        { id: "get_payslip", title: "Get Payslip", description: "Download your payslip" },
+                        { id: "payslip_menu", title: "Payslip", description: "Download your payslip" },
+                        { id: "loan_statement_menu", title: "Loan Statement", description: "View your loan details and balance" },
+                        { id: "loan_clearance_menu", title: "Loan Clearance Letter", description: "For a fully paid loan" },
                         { id: "back", title: "Back", description: "Go back" },
                         { id: "home", title: "Home", description: "Return to home" },
                         { id: "logout", title: "Logout", description: "Log out of the app" }
@@ -1030,7 +1307,39 @@ async function sendPayLoanConfirm(to, session, installmentsToPay) {
   await sendMessage(to, payload);
 }
 
-// ==================== BUG FIX #3 ====================
+// ==================== DOCUMENTS: Payslip / Loan Statement / Loan Clearance ====================
+// Shared confirmation screen for all three document types — per spec,
+// only 3 options here (Accept/Cancel/Home), so a button-type message
+// works fine and doesn't need the list-type conversion.
+async function sendDocumentConfirm(to, session, docType, title, cost) {
+  session.pendingDocumentType = docType;
+  session.pendingDocumentCost = cost;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: `You have selected to download your ${title}. Cost KES ${cost.toFixed(2)}.` },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "document_accept", title: "Accept" } },
+          { type: "reply", reply: { id: "document_cancel", title: "Cancel" } },
+          { type: "reply", reply: { id: "home", title: "Home" } }
+        ]
+      }
+    }
+  };
+  await sendMessage(to, payload);
+}
+
+async function sendPayslipMonthsPrompt(to, session) {
+  session.step = "enter_payslip_months";
+  await sendTextMessage(to, "Enter Number of months (1-12):");
+}
+
+
 // Original: id.replace("edit_", "").replace("_", " ") mangled labels
 // like "edit_nationalid" -> "nationalid" (no underscore to replace).
 // Fix: explicit lookup map so every field gets a proper display name.
@@ -1252,6 +1561,14 @@ async function handleButton(to, id, session) {
     await sendCancelLoanConfirm(to, session);
   }
   else if (id === "cancel_loan_yes") {
+    // Mark status BEFORE deleting from currentLoans — since
+    // loanApplications now holds a reference to this same object (see
+    // fix above), this is what keeps the historical record accurate
+    // after the object is no longer the "current" loan.
+    if (currentLoans[to]) {
+      currentLoans[to].status = "cancelled";
+      currentLoans[to].cancelledAt = new Date().toISOString();
+    }
     delete currentLoans[to];
     await sendTextMessage(to, "Your loan application has been successfully cancelled.");
     await sendWelcome(to);
@@ -1331,8 +1648,112 @@ async function handleButton(to, id, session) {
       loan.paymentInProgress = false;
     }
   }
-  else if (id === "get_payslip") {
-    await sendTextMessage(to, "You selected Get Payslip. (Feature coming soon)");
+  else if (id === "payslip_menu") {
+    await sendPayslipMonthsPrompt(to, session);
+  }
+  else if (id === "loan_statement_menu") {
+    const loan = getRelevantLoanForStatement(to);
+    if (!loan) {
+      await sendTextMessage(to, "You have no loan on record.");
+      await sendMainMenu(to, session);
+      return;
+    }
+    await sendDocumentConfirm(to, session, "loan_statement", "Loan Statement", DOCUMENT_COST_PER_UNIT);
+  }
+  else if (id === "loan_clearance_menu") {
+    const loan = findMostRecentPaidLoan(to);
+    if (!loan) {
+      await sendTextMessage(to, "You have no fully paid loan on record for a clearance letter.");
+      await sendMainMenu(to, session);
+      return;
+    }
+    await sendDocumentConfirm(to, session, "loan_clearance", "Loan Clearance Letter", DOCUMENT_COST_PER_UNIT);
+  }
+  else if (id === "document_cancel") {
+    delete session.pendingDocumentType;
+    delete session.pendingDocumentCost;
+    delete session.pendingDocumentMonths;
+    await sendMainMenu(to, session);
+  }
+  else if (id === "document_accept") {
+    const docType = session.pendingDocumentType;
+    const cost = session.pendingDocumentCost;
+    const user = registeredUsers[to];
+
+    if (!docType || !cost || !user) {
+      await sendTextMessage(to, "That request has expired. Let's start again.");
+      await sendMainMenu(to, session);
+      return;
+    }
+
+    // Re-verify eligibility BEFORE taking payment, so we never charge
+    // for something we can no longer deliver (e.g. the loan's status
+    // changed between the confirmation screen and now).
+    let loanForDoc = null;
+    if (docType === "loan_statement") {
+      loanForDoc = getRelevantLoanForStatement(to);
+      if (!loanForDoc) {
+        await sendTextMessage(to, "Your loan record is no longer available. No payment has been taken.");
+        delete session.pendingDocumentType;
+        delete session.pendingDocumentCost;
+        delete session.pendingDocumentMonths;
+        await sendMainMenu(to, session);
+        return;
+      }
+    } else if (docType === "loan_clearance") {
+      loanForDoc = findMostRecentPaidLoan(to);
+      if (!loanForDoc) {
+        await sendTextMessage(to, "Your fully paid loan record is no longer available. No payment has been taken.");
+        delete session.pendingDocumentType;
+        delete session.pendingDocumentCost;
+        delete session.pendingDocumentMonths;
+        await sendMainMenu(to, session);
+        return;
+      }
+    }
+
+    // Informational only — a real STK Push prompts for the M-Pesa PIN
+    // natively on the user's own phone, never via WhatsApp chat text.
+    await sendTextMessage(to, `You are about to pay KES ${cost.toFixed(2)} to MyMobi account XXXXX. Please enter your Mpesa PIN.`);
+
+    const stkResult = await triggerMpesaStkPush(to, cost);
+    if (!stkResult.success) {
+      await sendTextMessage(to, "Payment could not be processed. Please try again.");
+      return;
+    }
+
+    let html, docTitle;
+    if (docType === "payslip") {
+      const months = session.pendingDocumentMonths || 1;
+      html = generatePayslipHtml(user, months);
+      docTitle = "Payslip";
+    } else if (docType === "loan_statement") {
+      html = generateLoanStatementHtml(user, loanForDoc);
+      docTitle = "Loan Statement";
+    } else if (docType === "loan_clearance") {
+      html = generateLoanClearanceHtml(user, loanForDoc);
+      docTitle = "Loan Clearance Letter";
+    }
+
+    const token = generateDocumentToken();
+    documentStore[token] = {
+      to,
+      docType,
+      upn: user.upn,
+      html,
+      createdAt: Date.now(),
+      failedAttempts: 0
+    };
+
+    const link = `${BASE_URL}/documents/${token}`;
+    logInfo('document_generated', { to, docType, token });
+    await sendTextMessage(to, `Please click on this link to access your ${docTitle} ${link}`);
+
+    delete session.pendingDocumentType;
+    delete session.pendingDocumentCost;
+    delete session.pendingDocumentMonths;
+
+    await sendMainMenu(to, session);
   }
   else if (id === "back") {
     // BUG FIX #6: "Back" and "Home" previously did the exact same thing
@@ -1445,6 +1866,23 @@ async function handleTextInput(to, text, session) {
   }
 
   // =====================================================
+  // DOCUMENTS: PAYSLIP MONTHS ENTRY
+  // =====================================================
+  if (step === "enter_payslip_months") {
+    const months = parseInt(cleanText, 10);
+
+    if (!/^\d+$/.test(cleanText) || months < 1 || months > 12) {
+      await sendTextMessage(to, "Please enter a number between 1 and 12.");
+      return;
+    }
+
+    const cost = DOCUMENT_COST_PER_UNIT * months;
+    session.pendingDocumentMonths = months;
+    await sendDocumentConfirm(to, session, "payslip", `Payslip for the last ${months} month${months > 1 ? 's' : ''}`, cost);
+    return;
+  }
+
+  // =====================================================
   // EMERGENCY LOAN: AMOUNT ENTRY + PAYROLL NUMBER
   // =====================================================
   if (step === "enter_loan_amount") {
@@ -1535,8 +1973,14 @@ async function handleTextInput(to, text, session) {
     };
 
     // Also keep a permanent audit trail of every application ever made.
+    // FIX (found while building Loan Statement): this used to push a
+    // point-in-time COPY ({ ...currentLoans[to] }) — meaning any later
+    // change (approved, paid, installments, cancellation) never showed
+    // up here, silently going stale. Now it stores a reference to the
+    // SAME object, so both always agree — critical once this data gets
+    // shown to a user in an official-looking Loan Statement.
     if (!loanApplications[to]) loanApplications[to] = [];
-    loanApplications[to].push({ ...currentLoans[to] });
+    loanApplications[to].push(currentLoans[to]);
 
     logInfo('loan_application_submitted', { to, loanAmount: session.loanAmount, tenureMonths: session.loanTenureMonths, refNo, approvalCode });
 
@@ -2090,5 +2534,10 @@ module.exports = {
   getLoanBreakdown,
   hashPin,
   verifyPin,
-  PLATFORM_FEE_PER_MONTH
+  PLATFORM_FEE_PER_MONTH,
+  escapeHtml,
+  generatePayslipHtml,
+  generateLoanStatementHtml,
+  generateLoanClearanceHtml,
+  DOCUMENT_COST_PER_UNIT
 };
