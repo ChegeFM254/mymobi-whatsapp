@@ -378,19 +378,29 @@ async function sendEditOptions(to) {
 }
 
 async function sendAuthMenu(to) {
+  // Converted from "button" to "list" type: adding Log Out makes this
+  // 4 options, exceeding WhatsApp's 3-button cap — see the standing
+  // convention at the top of this file.
   const payload = {
     messaging_product: "whatsapp",
     to: to,
     type: "interactive",
     interactive: {
-      type: "button",
-      body: { text: "Welcome back! Please choose an option:" },
+      type: "list",
+      header: { type: "text", text: "Welcome Back" },
+      body: { text: "Please choose an option:" },
+      footer: { text: "MyMobi" },
       action: {
-        buttons: [
-          { type: "reply", reply: { id: "enter_pin", title: "Enter PIN" } },
-          { type: "reply", reply: { id: "forgot_pin", title: "Forgot PIN" } },
-          { type: "reply", reply: { id: "opt_out", title: "Opt Out" } }
-        ]
+        button: "Select Option",
+        sections: [{
+          title: "Options",
+          rows: [
+            { id: "enter_pin", title: "Enter PIN", description: "Log in with your PIN" },
+            { id: "forgot_pin", title: "Forgot PIN", description: "Reset your PIN" },
+            { id: "opt_out", title: "Opt Out", description: "Opt out of this service" },
+            { id: "logout", title: "Log Out", description: "Log out of the app" }
+          ]
+        }]
       }
     }
   };
@@ -878,6 +888,14 @@ async function handleButton(to, id, session) {
       await sendOptIn(to);
     }
   }
+  else if (id === "buy_airtime") {
+    // BUG FIX #13: this had no handler at all, so tapping it fell through
+    // to the generic "Sorry, I didn't understand that option" message —
+    // misleading, since the bot understood it fine, the feature just
+    // isn't built yet. Now consistent with get_payslip's treatment.
+    await sendTextMessage(to, "You selected Buy Airtime. (Feature coming soon)");
+    await sendWelcome(to);
+  }
   // ==================== AUTHENTICATION MENU (Returning Users) ====================
   // BUG FIX #8: these three buttons used to unconditionally reset
   // session.step and resend their prompt, with no check on where the
@@ -1115,8 +1133,19 @@ async function handleButton(to, id, session) {
     await sendWelcome(to);
   }
   else if (id === "logout") {
-    await sendTextMessage(to, "You have been logged out.");
-    delete userSessions[to];
+    // Clear the pending 60-second inactivity timer right away — otherwise
+    // it would still fire later and send a confusing "session timed out"
+    // message to a user who already logged out.
+    if (userSessions[to] && userSessions[to].timeoutId) {
+      clearTimeout(userSessions[to].timeoutId);
+    }
+
+    setTimeout(() => {
+      delete userSessions[to];
+      sendTextMessage(to, "You have successfully logged out.").catch(() => {
+        // Ignore errors sending the logout confirmation
+      });
+    }, 3000);
   }
   else {
     // Fallback for unrecognized button ids so users never get silence
