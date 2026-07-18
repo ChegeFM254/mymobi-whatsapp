@@ -851,7 +851,8 @@ async function sendWelcome(to) {
           title: "Services",
           rows: [
             { id: "civil_servants", title: "Civil Servants", description: "Emergency Loan" },
-            { id: "buy_airtime", title: "Buy Airtime", description: "Quick top up" }
+            { id: "buy_airtime", title: "Buy Airtime", description: "Quick top up" },
+            { id: "logout", title: "Log Out", description: "Log out of the app" }
           ]
         }]
       }
