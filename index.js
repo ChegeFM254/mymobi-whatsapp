@@ -62,6 +62,18 @@ const APP_SECRET = process.env.WHATSAPP_APP_SECRET;
 // isn't their fault.
 const ALLOW_LOGIN_WITHOUT_STORED_DATA = process.env.ALLOW_LOGIN_WITHOUT_STORED_DATA !== 'false';
 
+// ==================== SHARED TIMING CONSTANTS ====================
+// AUDIT CLEANUP: these were previously repeated as unnamed literals
+// (e.g. `5000` four separate times for the OTP/Approval/Verification
+// Code delivery delay) — named here once, matching how other durations
+// in this file (LOGIN_LOCKOUT_DURATION_MS, DOCUMENT_TTL_MS, etc.)
+// already work, and removing the risk of one occurrence quietly
+// drifting out of sync with the others during a future edit.
+const INACTIVITY_TIMEOUT_MS = 60 * 1000;         // session ends after this long with no activity
+const DEBOUNCE_MS = 800;                          // minimum gap before an identical rapid input is processed again
+const SIMULATED_DELIVERY_DELAY_MS = 5000;         // delay before a simulated OTP/Approval/Verification Code "arrives"
+const LOGOUT_DELAY_MS = 3000;                     // delay between tapping Logout and the session actually ending
+
 if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) {
   logWarn('config_missing', { missing: 'WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID', message: '⚠️  WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID is not set. Create a .env file (see .env.example).' });
 }
@@ -628,7 +640,7 @@ function resetTimeout(from) {
     sendTextMessage(from, "⏰ Your session has timed out due to inactivity.").catch(() => {
       // Ignore errors when sending timeout message
     });
-  }, 60000); // 60 seconds
+  }, INACTIVITY_TIMEOUT_MS);
 }
 
 // ==================== ITEM 6: HEALTH CHECK ====================
@@ -775,7 +787,7 @@ app.post('/webhook', async (req, res) => {
     // BUG FIX #4 (continued): debounce guard now covers BOTH button taps
     // and typed text, not just text. Previously this only lived inside
     // handleTextInput(), so double-tapping a button had no protection.
-    if (session.lastProcessed && (Date.now() - session.lastProcessed < 800)) {
+    if (session.lastProcessed && (Date.now() - session.lastProcessed < DEBOUNCE_MS)) {
       return;
     }
     session.lastProcessed = Date.now();
@@ -1594,7 +1606,7 @@ async function handleButton(to, id, session) {
       } catch (err) {
         // Ignore errors in this simulated delayed delivery
       }
-    }, 5000);
+    }, SIMULATED_DELIVERY_DELAY_MS);
   }
   else if (id === "opt_out") {
     if (session.step !== "civil_servants_choice") return;
@@ -1644,7 +1656,7 @@ async function handleButton(to, id, session) {
       } catch (err) {
         // Ignore errors in this simulated delayed delivery
       }
-    }, 5000);
+    }, SIMULATED_DELIVERY_DELAY_MS);
   }
   else if (id === "edit_details") {
     await sendEditOptions(to);
@@ -1947,7 +1959,7 @@ async function handleButton(to, id, session) {
       sendTextMessage(to, "You have successfully logged out.").catch(() => {
         // Ignore errors sending the logout confirmation
       });
-    }, 3000);
+    }, LOGOUT_DELAY_MS);
   }
   else {
     // Fallback for unrecognized button ids so users never get silence
@@ -2186,7 +2198,7 @@ async function handleTextInput(to, text, session) {
       } catch (err) {
         // Ignore errors in this simulated delayed delivery
       }
-    }, 5000);
+    }, SIMULATED_DELIVERY_DELAY_MS);
 
     return;
   }
@@ -2441,7 +2453,7 @@ async function handleTextInput(to, text, session) {
       } catch (err) {
         // Ignore errors in this simulated delayed delivery
       }
-    }, 5000);
+    }, SIMULATED_DELIVERY_DELAY_MS);
     return;
   }
 
