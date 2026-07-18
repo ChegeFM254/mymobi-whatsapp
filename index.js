@@ -1032,10 +1032,15 @@ async function handleButton(to, id, session) {
 
     if (isFullyPaid) {
       await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. Your loan has been fully paid. Thank you for using MyMobi services.`);
+      // Loan fully settled — that "session" with this loan is over, so
+      // send the user back to Welcome/Home rather than the Main Menu.
+      await sendWelcome(to);
     } else {
       await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. You have a loan balance of KES ${remainingBalance.toLocaleString()}. Thank you for using MyMobi services.`);
+      // Balance remains — keep the user in the Main Menu since they may
+      // still have more loan-related actions available.
+      await sendMainMenu(to, session);
     }
-    await sendMainMenu(to, session);
   }
   else if (id === "get_payslip") {
     await sendTextMessage(to, "You selected Get Payslip. (Feature coming soon)");
@@ -1283,7 +1288,7 @@ async function handleTextInput(to, text, session) {
     delete session.approvalPayrollNumber;
 
     await sendTextMessage(to, "Your loan approval has been received and is being processed. Please wait for an SMS notification from MyMobi.");
-    await sendMainMenu(to, session);
+    await sendWelcome(to);
     return;
   }
 
