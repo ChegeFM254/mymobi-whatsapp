@@ -957,6 +957,7 @@ async function sendRegistrationComplete(to, session) {
         "• Do not share this PIN with anyone\n" +
         "• For your protection, we strongly recommend deleting this chat or the messages containing your PIN"
     );
+  session.isAuthenticated = true;
   await sendMainMenu(to, session);
 }
 
@@ -986,6 +987,7 @@ async function sendPinResetComplete(to, session) {
     "✅ Your PIN has been updated successfully.\n\n" +
     "🔒 Do not share this PIN with anyone."
   );
+  session.isAuthenticated = true;
   await sendMainMenu(to, session);
 }
 
@@ -1406,6 +1408,15 @@ const MENU_BACK_MAP = {
 
 async function handleButton(to, id, session) {
   if (id === "civil_servants") {
+    // Stay logged in for the rest of the session — only Logout or the
+    // inactivity timeout should ever force Log In again. Returning to
+    // Welcome after completing an action (loan, payment, document) is
+    // fine; re-entering UPN/PIN/Verification Code every time is not.
+    if (session.isAuthenticated) {
+      await sendMainMenu(to, session);
+      return;
+    }
+
     // Multi-channel change: this app is one of several channels (USSD,
     // PWA also exist). We can no longer assume "not in our local store"
     // means "genuinely new" — someone could already be a registered
@@ -1709,7 +1720,15 @@ async function handleButton(to, id, session) {
   else if (id === "loan_clearance_menu") {
     const loan = findMostRecentPaidLoan(to);
     if (!loan) {
-      await sendTextMessage(to, "You have no fully paid loan on record for a clearance letter.");
+      // Distinguish "you have a loan but haven't finished paying it"
+      // from "you've never had a loan" — the former gets a specific,
+      // actionable message pointing at Pay Loan.
+      const outstandingLoan = currentLoans[to] && currentLoans[to].status === "approved";
+      if (outstandingLoan) {
+        await sendTextMessage(to, "You have an outstanding loan balance. Pay Loan to download Loan Clearance Letter.");
+      } else {
+        await sendTextMessage(to, "You have no loan on record for a clearance letter.");
+      }
       await sendMainMenu(to, session);
       return;
     }
@@ -2363,6 +2382,7 @@ async function handleTextInput(to, text, session) {
     // UPN + PIN + Verification Code all correct — now proceed to Main Menu.
     delete session.loginAttempts;
     delete session.verificationCode;
+    session.isAuthenticated = true;
     await sendMainMenu(to, session);
     return;
   }
