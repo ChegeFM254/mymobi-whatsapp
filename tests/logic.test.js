@@ -27,7 +27,12 @@ const {
   generatePayslipHtml,
   generateLoanStatementHtml,
   generateLoanClearanceHtml,
-  DOCUMENT_COST_PER_UNIT
+  DOCUMENT_COST_PER_UNIT,
+  getLoginLockoutMinutesRemaining,
+  applyLoginLockout,
+  MAX_LOGIN_ATTEMPTS,
+  verifyLoginCredentials,
+  registeredUsers
 } = require(path.join(__dirname, '..', 'index.js'));
 
 // ==================== UPN VALIDATION ====================
@@ -242,4 +247,55 @@ test('DOCUMENT_COST_PER_UNIT: matches confirmed rate of KES 23.20', () => {
 test('Payslip cost calculation: matches confirmed example (3 months = KES 69.60)', () => {
   const cost = DOCUMENT_COST_PER_UNIT * 3;
   assert.equal(cost.toFixed(2), '69.60');
+});
+
+// ==================== LOGIN LOCKOUT ====================
+test('getLoginLockoutMinutesRemaining: returns 0 when no lockout is active', () => {
+  assert.equal(getLoginLockoutMinutesRemaining('254700000001_test_unused'), 0);
+});
+
+test('applyLoginLockout + getLoginLockoutMinutesRemaining: reports approximately 10 minutes immediately after locking', () => {
+  const testNumber = '254700000002_test';
+  applyLoginLockout(testNumber);
+  const remaining = getLoginLockoutMinutesRemaining(testNumber);
+  assert.ok(remaining >= 9 && remaining <= 10, `Expected ~10 minutes remaining, got ${remaining}`);
+});
+
+test('MAX_LOGIN_ATTEMPTS: matches confirmed rule of 3 attempts', () => {
+  assert.equal(MAX_LOGIN_ATTEMPTS, 3);
+});
+
+// ==================== LOGIN VERIFICATION (backend placeholder) ====================
+test('verifyLoginCredentials: no existing record -> testing-mode bypass succeeds and creates a synthetic account', async () => {
+  const testNumber = '254700000010_test';
+  const result = await verifyLoginCredentials(testNumber, '12345', '54321');
+  assert.equal(result.success, true);
+  assert.equal(result.user.upn, '12345');
+  assert.equal(result.user.isTestingBypassAccount, true);
+  assert.equal(registeredUsers[testNumber].upn, '12345', 'Synthetic account should be persisted so downstream features (Payslip, etc.) find it');
+});
+
+test('verifyLoginCredentials: existing record with correct UPN+PIN succeeds using real data (no bypass)', async () => {
+  const testNumber = '254700000011_test';
+  registeredUsers[testNumber] = {
+    firstName: 'Real', lastName: 'User', upn: '19999999',
+    pin: await hashPin('11111'), status: 'active', failedPinAttempts: 0
+  };
+  const result = await verifyLoginCredentials(testNumber, '19999999', '11111');
+  assert.equal(result.success, true);
+  assert.equal(result.user.firstName, 'Real');
+  assert.equal(result.user.isTestingBypassAccount, undefined, 'Should use the real record, not create a synthetic one');
+});
+
+test('verifyLoginCredentials: existing record with WRONG UPN or PIN fails (bypass does not apply once a real record exists)', async () => {
+  const testNumber = '254700000012_test';
+  registeredUsers[testNumber] = {
+    firstName: 'Real', lastName: 'User', upn: '19999999',
+    pin: await hashPin('11111'), status: 'active', failedPinAttempts: 0
+  };
+  const wrongPin = await verifyLoginCredentials(testNumber, '19999999', '99999');
+  assert.equal(wrongPin.success, false);
+
+  const wrongUpn = await verifyLoginCredentials(testNumber, '10000000', '11111');
+  assert.equal(wrongUpn.success, false);
 });
