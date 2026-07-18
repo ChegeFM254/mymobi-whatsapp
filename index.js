@@ -146,6 +146,31 @@ const userSessions = {};
 // ==================== REGISTERED USERS STORAGE ====================
 const registeredUsers = {};   // Key = WhatsApp number (from), Value = user data
 
+// ==================== LOG IN LOCKOUT (10-minute temporary block) ====================
+// Keyed by phone number rather than the user record, so a lockout still
+// applies even if the entered UPN never matched any local account —
+// otherwise repeatedly guessing a wrong UPN would never trigger it.
+// Replaces the old permanent "contact Customer Care" block, which was
+// tied to the PIN-only login flow this new UPN+PIN flow replaces.
+const loginLockouts = {}; // Key = WhatsApp number -> unlock timestamp (ms)
+const LOGIN_LOCKOUT_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_LOGIN_ATTEMPTS = 3;
+
+function getLoginLockoutMinutesRemaining(to) {
+  const unlockAt = loginLockouts[to];
+  if (!unlockAt) return 0;
+  const remainingMs = unlockAt - Date.now();
+  if (remainingMs <= 0) {
+    delete loginLockouts[to];
+    return 0;
+  }
+  return Math.ceil(remainingMs / 60000);
+}
+
+function applyLoginLockout(to) {
+  loginLockouts[to] = Date.now() + LOGIN_LOCKOUT_DURATION_MS;
+}
+
 // ==================== EMERGENCY LOAN ====================
 const loanApplications = {}; // Key = WhatsApp number, Value = array of ALL submitted loan applications (audit trail)
 
@@ -846,28 +871,32 @@ async function sendEditOptions(to) {
   await sendMessage(to, payload);
 }
 
-async function sendAuthMenu(to) {
-  // Converted from "button" to "list" type: adding Log Out makes this
-  // 4 options, exceeding WhatsApp's 3-button cap — see the standing
-  // convention at the top of this file.
+// NOTE: despite the similar name, this is unrelated to the
+// "civil_servants_menu" MENU_BACK_MAP key used by sendMainMenu — that's
+// the POST-login main menu (Emergency Loan/Payslip/etc). This function
+// is the PRE-login screen (Log In/Register/Forgot PIN/Opt Out), tracked
+// via session.step = "civil_servants_choice", a separate mechanism.
+async function sendCivilServantsMenu(to, session) {
+  if (session) session.step = "civil_servants_choice";
+
   const payload = {
     messaging_product: "whatsapp",
     to: to,
     type: "interactive",
     interactive: {
       type: "list",
-      header: { type: "text", text: "Welcome Back" },
-      body: { text: "Please choose an option:" },
+      header: { type: "text", text: "Civil Servants" },
+      body: { text: "Select a service:" },
       footer: { text: "MyMobi" },
       action: {
         button: "Select Option",
         sections: [{
           title: "Options",
           rows: [
-            { id: "enter_pin", title: "Enter PIN", description: "Log in with your PIN" },
+            { id: "login_menu", title: "Log In", description: "Already registered? Log in here" },
+            { id: "register_menu", title: "Register", description: "New to MyMobi? Register here" },
             { id: "forgot_pin", title: "Forgot PIN", description: "Reset your PIN" },
-            { id: "opt_out", title: "Opt Out", description: "Opt out of this service" },
-            { id: "logout", title: "Log Out", description: "Log out of the app" }
+            { id: "opt_out", title: "Opt Out", description: "Opt out of this service" }
           ]
         }]
       }
@@ -1377,22 +1406,14 @@ const MENU_BACK_MAP = {
 
 async function handleButton(to, id, session) {
   if (id === "civil_servants") {
-    const user = registeredUsers[to];
-
-    if (user && user.status === "blocked") {
-      await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
-      return;
-    }
-
-    if (user && user.status === "active") {
-      // Returning user - show authentication options
-      session.step = "auth_menu";
-      await sendAuthMenu(to);
-    } else {
-      // New user or opted out - start registration
-      session.step = "optin";
-      await sendOptIn(to);
-    }
+    // Multi-channel change: this app is one of several channels (USSD,
+    // PWA also exist). We can no longer assume "not in our local store"
+    // means "genuinely new" — someone could already be a registered
+    // user via another channel who just hasn't used WhatsApp yet. So
+    // the old "known user -> PIN screen, unknown -> registration" branch
+    // is gone; everyone sees the same Log In / Register choice and
+    // decides for themselves.
+    await sendCivilServantsMenu(to, session);
   }
   else if (id === "buy_airtime") {
     // BUG FIX #13: this had no handler at all, so tapping it fell through
@@ -1402,25 +1423,43 @@ async function handleButton(to, id, session) {
     await sendTextMessage(to, "You selected Buy Airtime. (Feature coming soon)");
     await sendWelcome(to);
   }
-  // ==================== AUTHENTICATION MENU (Returning Users) ====================
-  // BUG FIX #8: these three buttons used to unconditionally reset
-  // session.step and resend their prompt, with no check on where the
-  // session actually was. If WhatsApp redelivers the interactive
-  // message (or the button gets tapped more than once), a stale tap
-  // arriving AFTER the user had already moved on — e.g. after correctly
-  // entering their PIN and being sent to "Enter Verification Code" —
-  // would silently reset session.step back to "enter_pin" and resend
-  // "Enter your PIN:", producing two conflicting prompts almost at
-  // once. Each handler now only acts if the session is still actually
-  // sitting at the Auth Menu; anything else is a stale/duplicate tap
-  // and is silently ignored.
-  else if (id === "enter_pin") {
-    if (session.step !== "auth_menu") return;
-    session.step = "enter_pin";
-    await sendTextMessage(to, "Enter your PIN:");
+  // ==================== CIVIL SERVANTS MENU: Log In / Register / Forgot PIN / Opt Out ====================
+  // Replaces the old "Enter PIN" auth menu — multi-channel users (USSD,
+  // PWA) shouldn't be forced through registration again just because
+  // they're using WhatsApp for the first time, so this now explicitly
+  // asks Log In vs Register rather than assuming based on local data.
+  else if (id === "login_menu") {
+    const lockoutMinutes = getLoginLockoutMinutesRemaining(to);
+    if (lockoutMinutes > 0) {
+      await sendTextMessage(to, `Too many incorrect attempts. Your account is temporarily locked. Please try again in ${lockoutMinutes} minute(s).`);
+      return;
+    }
+    session.step = "login_enter_upn";
+    session.loginAttempts = 0;
+    await sendTextMessage(to, "Enter UPN:");
+  }
+  else if (id === "register_menu") {
+    const existingUser = registeredUsers[to];
+    if (existingUser && existingUser.status === "active") {
+      // Light guard: avoid silently overwriting an existing local
+      // registration if someone taps Register by mistake.
+      await sendTextMessage(to, "You already have an account registered on this number. Please use Log In instead.");
+      await sendCivilServantsMenu(to, session);
+      return;
+    }
+    // If Register for the first time, follow already developed process.
+    session.step = "optin";
+    await sendOptIn(to);
   }
   else if (id === "forgot_pin") {
-    if (session.step !== "auth_menu") return;
+    if (session.step !== "civil_servants_choice") return;
+
+    const lockoutMinutes = getLoginLockoutMinutesRemaining(to);
+    if (lockoutMinutes > 0) {
+      await sendTextMessage(to, `Too many incorrect attempts. Your account is temporarily locked. Please try again in ${lockoutMinutes} minute(s).`);
+      return;
+    }
+
     session.step = "forgot_pin";
     session.isPinReset = true; // marks this as a reset flow, not fresh registration
     session.otp = generateFiveDigitCode();
@@ -1445,7 +1484,14 @@ async function handleButton(to, id, session) {
     }, 5000);
   }
   else if (id === "opt_out") {
-    if (session.step !== "auth_menu") return;
+    if (session.step !== "civil_servants_choice") return;
+
+    const lockoutMinutes = getLoginLockoutMinutesRemaining(to);
+    if (lockoutMinutes > 0) {
+      await sendTextMessage(to, `Too many incorrect attempts. Your account is temporarily locked. Please try again in ${lockoutMinutes} minute(s).`);
+      return;
+    }
+
     session.step = "opt_out_confirmation";
     await sendTextMessage(to, "You are about to OPT OUT of Emergency Loan Services.\n\nDo you want to proceed? (Yes/No)");
   }
@@ -2213,14 +2259,42 @@ async function handleTextInput(to, text, session) {
   }
 
   // =====================================================
-  // RETURNING USER: ENTER PIN + VERIFICATION CODE
+  // LOG IN: UPN + PIN (multi-channel — no verification code step)
   // =====================================================
-  if (step === "enter_pin") {
-    if (!cleanText) {
-      await sendTextMessage(to, "Please enter your 5-digit PIN.");
+  if (step === "login_enter_upn") {
+    if (!isValidUpn(cleanText)) {
+      await sendTextMessage(to, UPN_ERROR_MESSAGE);
       return;
     }
 
+    const user = registeredUsers[to];
+
+    // "Check if correct with back end" — for now this can only check
+    // OUR local WhatsApp-linked record (see the scoping note: a real
+    // shared backend across USSD/PWA/WhatsApp is a separate, larger
+    // integration). A cross-channel user without a local WhatsApp
+    // record will fail here until that integration exists.
+    if (!user || cleanText !== user.upn) {
+      session.loginAttempts = (session.loginAttempts || 0) + 1;
+
+      if (session.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+        applyLoginLockout(to);
+        await sendTextMessage(to, "Too many incorrect attempts. Your account has been temporarily locked for 10 minutes.");
+        delete userSessions[to];
+        return;
+      }
+
+      const attemptsLeft = MAX_LOGIN_ATTEMPTS - session.loginAttempts;
+      await sendTextMessage(to, `UPN not recognized. You have ${attemptsLeft} attempt(s) remaining.`);
+      return;
+    }
+
+    session.step = "login_enter_pin";
+    await sendTextMessage(to, "Enter PIN:");
+    return;
+  }
+
+  if (step === "login_enter_pin") {
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
       return;
@@ -2228,74 +2302,68 @@ async function handleTextInput(to, text, session) {
 
     const user = registeredUsers[to];
 
-    if (!user) {
-      await sendTextMessage(to, "User not found. Please register first.");
-      return;
-    }
+    if (!user || !(await verifyPin(cleanText, user.pin))) {
+      session.loginAttempts = (session.loginAttempts || 0) + 1;
 
-    if (user.status === "blocked") {
-      await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
-      return;
-    }
-
-    if (await verifyPin(cleanText, user.pin)) {
-      user.failedPinAttempts = 0;
-      session.step = "enter_verification_code";
-      session.verificationCode = generateFiveDigitCode();
-      session.verificationAttempts = 0;
-      await sendTextMessage(to, "Enter Verification Code:");
-
-      // TODO: remove once a real SMS/backend delivers this. Simulated
-      // delivery arrives as a separate WhatsApp message 5 seconds later,
-      // matching the Approval Code / OTP pattern.
-      const codeForDelivery = session.verificationCode;
-      setTimeout(async () => {
-        try {
-          // Guard against a stale delivery if the user re-entered their
-          // PIN (and got a new verification code) before this fires.
-          if (userSessions[to] && userSessions[to].verificationCode === codeForDelivery) {
-            await sendTextMessage(to, `Verification Code ${codeForDelivery}`);
-          }
-        } catch (err) {
-          // Ignore errors in this simulated delayed delivery
-        }
-      }, 5000);
-    } else {
-      user.failedPinAttempts = (user.failedPinAttempts || 0) + 1;
-
-      if (user.failedPinAttempts >= 3) {
-        user.status = "blocked";
-        await sendTextMessage(to, "Your account is blocked. Please contact Customer Care for assistance on WhatsApp 0758 035 381");
-      } else {
-        const attemptsLeft = 3 - user.failedPinAttempts;
-        await sendTextMessage(to, `Incorrect PIN. You have ${attemptsLeft} attempt(s) remaining.`);
+      if (session.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+        applyLoginLockout(to);
+        await sendTextMessage(to, "Too many incorrect attempts. Your account has been temporarily locked for 10 minutes.");
+        delete userSessions[to];
+        return;
       }
+
+      const attemptsLeft = MAX_LOGIN_ATTEMPTS - session.loginAttempts;
+      await sendTextMessage(to, `Incorrect PIN. You have ${attemptsLeft} attempt(s) remaining.`);
+      return;
     }
+
+    // Correct UPN + PIN — Verification Code is still required before
+    // Main Menu (restored per explicit correction — this step stays).
+    session.step = "login_enter_verification_code";
+    session.verificationCode = generateFiveDigitCode();
+    await sendTextMessage(to, "Enter Verification Code:");
+
+    // TODO: remove once a real SMS/backend delivers this. Simulated
+    // delivery arrives as a separate WhatsApp message 5 seconds later,
+    // matching the Approval Code / OTP pattern used everywhere else.
+    const codeForDelivery = session.verificationCode;
+    setTimeout(async () => {
+      try {
+        if (userSessions[to] && userSessions[to].verificationCode === codeForDelivery) {
+          await sendTextMessage(to, `Verification Code ${codeForDelivery}`);
+        }
+      } catch (err) {
+        // Ignore errors in this simulated delayed delivery
+      }
+    }, 5000);
     return;
   }
 
-  if (step === "enter_verification_code") {
+  if (step === "login_enter_verification_code") {
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid code. Please enter a 5-digit verification code.");
       return;
     }
 
-    if (cleanText === session.verificationCode) {
-      delete session.verificationCode;
-      await sendTextMessage(to, "Verification successful!");
-      await sendMainMenu(to, session);
-    } else {
-      session.verificationAttempts = (session.verificationAttempts || 0) + 1;
+    if (cleanText !== session.verificationCode) {
+      session.loginAttempts = (session.loginAttempts || 0) + 1;
 
-      if (session.verificationAttempts >= 3) {
-        await sendTextMessage(to, "Too many incorrect attempts. Please start again.");
-        session.step = "enter_pin";
-        await sendTextMessage(to, "Enter your 5-digit PIN:");
-      } else {
-        const attemptsLeft = 3 - session.verificationAttempts;
-        await sendTextMessage(to, `Incorrect code. You have ${attemptsLeft} attempt(s) remaining.`);
+      if (session.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+        applyLoginLockout(to);
+        await sendTextMessage(to, "Too many incorrect attempts. Your account has been temporarily locked for 10 minutes.");
+        delete userSessions[to];
+        return;
       }
+
+      const attemptsLeft = MAX_LOGIN_ATTEMPTS - session.loginAttempts;
+      await sendTextMessage(to, `Incorrect code. You have ${attemptsLeft} attempt(s) remaining.`);
+      return;
     }
+
+    // UPN + PIN + Verification Code all correct — now proceed to Main Menu.
+    delete session.loginAttempts;
+    delete session.verificationCode;
+    await sendMainMenu(to, session);
     return;
   }
 
@@ -2328,7 +2396,7 @@ async function handleTextInput(to, text, session) {
       await sendTextMessage(to, "To confirm opt out, please enter your 5-digit PIN:");
     } else if (response === "no" || response === "n") {
       await sendTextMessage(to, "Opt out cancelled.");
-      await sendAuthMenu(to);
+      await sendCivilServantsMenu(to, session);
     } else {
       await sendTextMessage(to, "Please reply with Yes or No.");
     }
@@ -2539,5 +2607,8 @@ module.exports = {
   generatePayslipHtml,
   generateLoanStatementHtml,
   generateLoanClearanceHtml,
-  DOCUMENT_COST_PER_UNIT
+  DOCUMENT_COST_PER_UNIT,
+  getLoginLockoutMinutesRemaining,
+  applyLoginLockout,
+  MAX_LOGIN_ATTEMPTS
 };
