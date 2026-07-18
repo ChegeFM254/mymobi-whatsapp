@@ -22,7 +22,12 @@ const {
   getLoanBreakdown,
   hashPin,
   verifyPin,
-  PLATFORM_FEE_PER_MONTH
+  PLATFORM_FEE_PER_MONTH,
+  escapeHtml,
+  generatePayslipHtml,
+  generateLoanStatementHtml,
+  generateLoanClearanceHtml,
+  DOCUMENT_COST_PER_UNIT
 } = require(path.join(__dirname, '..', 'index.js'));
 
 // ==================== UPN VALIDATION ====================
@@ -164,4 +169,77 @@ test('hashPin: never stores the PIN in plain text', async () => {
 test('verifyPin: returns false (not a crash) for a missing/undefined stored hash', async () => {
   const result = await verifyPin('12345', undefined);
   assert.equal(result, false);
+});
+
+// ==================== DOCUMENT GENERATION (Payslip / Loan Statement / Loan Clearance) ====================
+test('escapeHtml: neutralizes script tags (XSS protection)', () => {
+  const malicious = '<script>alert("hacked")</script>';
+  const escaped = escapeHtml(malicious);
+  assert.ok(!escaped.includes('<script>'));
+  assert.ok(escaped.includes('&lt;script&gt;'));
+});
+
+test('escapeHtml: handles undefined/null without crashing', () => {
+  assert.equal(escapeHtml(undefined), '');
+  assert.equal(escapeHtml(null), '');
+});
+
+test('generatePayslipHtml: a malicious first name cannot inject a script tag', () => {
+  const user = { firstName: '<script>alert(1)</script>', lastName: 'Doe', upn: '12345' };
+  const html = generatePayslipHtml(user, 3);
+  assert.ok(!html.includes('<script>alert(1)</script>'), 'Raw script tag must not appear in output');
+  assert.ok(html.includes('&lt;script&gt;'), 'Should appear escaped instead');
+});
+
+test('generatePayslipHtml: produces one section per requested month', () => {
+  const user = { firstName: 'Jane', lastName: 'Doe', upn: '12345' };
+  const html3 = generatePayslipHtml(user, 3);
+  const html1 = generatePayslipHtml(user, 1);
+  // 3 months should produce a longer document than 1 month
+  assert.ok(html3.length > html1.length);
+});
+
+test('generateLoanStatementHtml: reflects the loan\'s actual balance and required fields', () => {
+  const user = { firstName: 'Jane', lastName: 'Doe', upn: '12345' };
+  const loan = {
+    refNo: 'TEST1234',
+    loanAmount: 35000,
+    tenureMonths: 3,
+    status: 'approved',
+    installmentsPaid: 1,
+    dueDate: '2026-10-18',
+    breakdown: { monthlyInstallment: 14442 }
+  };
+  const html = generateLoanStatementHtml(user, loan);
+  assert.ok(html.includes('28,884') || html.includes('28884'), 'Should show correct remaining balance after 1 installment');
+  assert.ok(html.includes('MFS Technologies Limited'), 'Should show the lender name');
+  assert.ok(html.includes('Jane') && html.includes('Doe'));
+  assert.ok(html.includes('Statement Date'));
+});
+
+test('generateLoanClearanceHtml: confirms fully paid status and required fields', () => {
+  const user = { firstName: 'Jane', lastName: 'Doe', upn: '12345', nationalId: '87654321' };
+  const loan = {
+    refNo: 'TEST5678',
+    loanAmount: 20000,
+    tenureMonths: 1,
+    installmentsPaid: 1,
+    dueDate: '2026-02-01',
+    approvedAt: '2026-01-01T00:00:00.000Z',
+    breakdown: { monthlyInstallment: 20000 }
+  };
+  const html = generateLoanClearanceHtml(user, loan);
+  assert.ok(html.includes('MFS Technologies Limited'), 'Should show the lender name');
+  assert.ok(html.includes('Loan Status') && html.includes('Paid'));
+  assert.ok(html.includes('Letter Date'));
+  assert.ok(html.includes('20,000'), 'Fully repaid loan should show the repayment amount');
+});
+
+test('DOCUMENT_COST_PER_UNIT: matches confirmed rate of KES 23.20', () => {
+  assert.equal(DOCUMENT_COST_PER_UNIT, 23.20);
+});
+
+test('Payslip cost calculation: matches confirmed example (3 months = KES 69.60)', () => {
+  const cost = DOCUMENT_COST_PER_UNIT * 3;
+  assert.equal(cost.toFixed(2), '69.60');
 });
