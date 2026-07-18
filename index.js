@@ -25,6 +25,18 @@ const rateLimit = require('express-rate-limit');
 // ============================================================================
 
 const app = express();
+
+// Render (like Heroku, Railway, etc.) sits its own reverse proxy in
+// front of the app, which sets X-Forwarded-For. Express doesn't trust
+// that header by default, so express-rate-limit can't tell users apart
+// by IP and throws a validation error. The fix is to tell Express
+// exactly how many proxy hops to trust — NOT `true`, which is a known
+// security anti-pattern: it would trust the LEFTMOST entry in
+// X-Forwarded-For, a value a malicious client can set themselves,
+// letting them spoof any IP and bypass the rate limiter entirely.
+// `1` matches Render's setup (a single hop between the internet and
+// this app) and correctly extracts the real client IP instead.
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 
 // ==================== CONFIG (now from environment) ====================
@@ -36,11 +48,28 @@ const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'mymobi_test_123';
 // from your access token.
 const APP_SECRET = process.env.WHATSAPP_APP_SECRET;
 
+// ==================== LOGIN: testing bypass toggle ====================
+// Controls whether Log In accepts UPN+PIN for a WhatsApp number with no
+// local record (see verifyLoginCredentials below). Defaults to ON so
+// testing isn't blocked by the in-memory-storage data loss issue.
+//
+// FOR UAT/PRODUCTION: set the environment variable
+// ALLOW_LOGIN_WITHOUT_STORED_DATA=false in Render — no code change
+// needed. This restores the stricter behavior: Log In requires a real
+// local record, and someone with none gets a clear "no account linked"
+// message immediately (before being asked for UPN/PIN at all), rather
+// than being allowed through or risking a lockout for something that
+// isn't their fault.
+const ALLOW_LOGIN_WITHOUT_STORED_DATA = process.env.ALLOW_LOGIN_WITHOUT_STORED_DATA !== 'false';
+
 if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) {
   logWarn('config_missing', { missing: 'WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID', message: '⚠️  WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID is not set. Create a .env file (see .env.example).' });
 }
 if (!APP_SECRET) {
   logWarn('webhook_signature_verification_disabled', { reason: 'WHATSAPP_APP_SECRET not set', message: '⚠️  WHATSAPP_APP_SECRET is not set — webhook signature verification is DISABLED. Anyone who finds this URL can currently send fake webhook events. Set WHATSAPP_APP_SECRET when you are ready to lock this down (see .env.example). This warning does not block testing.' });
+}
+if (!ALLOW_LOGIN_WITHOUT_STORED_DATA) {
+  logWarn('login_testing_bypass_disabled', { message: 'ALLOW_LOGIN_WITHOUT_STORED_DATA=false — Log In now requires a real local record; the testing bypass is off.' });
 }
 
 // bodyParser's `verify` callback captures the raw request bytes before
@@ -492,6 +521,63 @@ function findMostRecentPaidLoan(to) {
 async function triggerMpesaStkPush(to, amount) {
   logInfo('mpesa_stk_push_simulated', { to, amount });
   return { success: true };
+}
+
+// ==================== LOG IN VERIFICATION (backend placeholder) ====================
+// TODO: replace the body of this function with a real backend API call
+// once a UAT/Production backend exists — one that checks UPN + PIN
+// against the shared multi-channel account system (USSD, PWA,
+// WhatsApp) and returns whether they're valid, plus the account's real
+// KYC details. This is the ONLY place that needs to change; every call
+// site just awaits verifyLoginCredentials() and reacts to the result,
+// regardless of what's actually behind it.
+//
+// CURRENT (testing-mode) BEHAVIOR:
+//  - If a local record already exists for this WhatsApp number (i.e.
+//    someone registered through this bot during this server's current
+//    run), the entered UPN + PIN must genuinely match it — keeps
+//    testing realistic for anyone who actually went through Register.
+//  - If NO local record exists — the common case right now, since data
+//    is wiped on every restart, or for a genuine multi-channel user
+//    this WhatsApp number hasn't been linked to yet — ANY
+//    correctly-formatted UPN + PIN is accepted, and a temporary
+//    synthetic account is created on the fly so the rest of the app
+//    (Payslip, Loan Statement, etc. — all of which expect a real user
+//    record) has something to work with. This is explicitly NOT real
+//    verification; it exists purely so the WhatsApp flow can be built
+//    and tested end-to-end ahead of the real backend integration.
+async function verifyLoginCredentials(to, upn, pin) {
+  const existingUser = registeredUsers[to];
+
+  if (existingUser) {
+    const pinMatches = await verifyPin(pin, existingUser.pin);
+    if (upn === existingUser.upn && pinMatches) {
+      return { success: true, user: existingUser };
+    }
+    return { success: false, user: null };
+  }
+
+  if (!ALLOW_LOGIN_WITHOUT_STORED_DATA) {
+    // Defense in depth: the login_menu handler already blocks this
+    // case earlier when the flag is off, but this function stays
+    // correct on its own regardless of what calls it.
+    return { success: false, user: null };
+  }
+
+  logWarn('login_testing_bypass_used', { to, upn });
+  const syntheticUser = {
+    firstName: "Test",
+    lastName: "User",
+    upn: upn,
+    nationalId: "00000000", // placeholder — not real KYC data
+    mobileNumber: to,
+    pin: await hashPin(pin),
+    status: "active",
+    failedPinAttempts: 0,
+    isTestingBypassAccount: true // flags this record as not real for debugging/logs
+  };
+  registeredUsers[to] = syntheticUser;
+  return { success: true, user: syntheticUser };
 }
 
 
@@ -1445,6 +1531,21 @@ async function handleButton(to, id, session) {
       await sendTextMessage(to, `Too many incorrect attempts. Your account is temporarily locked. Please try again in ${lockoutMinutes} minute(s).`);
       return;
     }
+
+    // PRODUCTION CONDITION (currently bypassed by default via
+    // ALLOW_LOGIN_WITHOUT_STORED_DATA — see top of file). When that
+    // flag is false, check UPFRONT whether this WhatsApp number has any
+    // local record at all, before asking for UPN/PIN. Without this,
+    // someone with no local record would type through the whole flow,
+    // always fail no matter what they enter, and eventually get hit
+    // with the same 3-strikes lockout as someone genuinely guessing
+    // wrong — punishing them for something that isn't their fault.
+    if (!ALLOW_LOGIN_WITHOUT_STORED_DATA && !registeredUsers[to]) {
+      await sendTextMessage(to, "We don't have an account linked to this WhatsApp number yet.\n\nIf you're already registered (e.g. via USSD or the app), please select Register to link this WhatsApp number to your account. If you're new to MyMobi, Register to get started.");
+      await sendCivilServantsMenu(to, session);
+      return;
+    }
+
     session.step = "login_enter_upn";
     session.loginAttempts = 0;
     await sendTextMessage(to, "Enter UPN:");
@@ -2286,28 +2387,11 @@ async function handleTextInput(to, text, session) {
       return;
     }
 
-    const user = registeredUsers[to];
-
-    // "Check if correct with back end" — for now this can only check
-    // OUR local WhatsApp-linked record (see the scoping note: a real
-    // shared backend across USSD/PWA/WhatsApp is a separate, larger
-    // integration). A cross-channel user without a local WhatsApp
-    // record will fail here until that integration exists.
-    if (!user || cleanText !== user.upn) {
-      session.loginAttempts = (session.loginAttempts || 0) + 1;
-
-      if (session.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
-        applyLoginLockout(to);
-        await sendTextMessage(to, "Too many incorrect attempts. Your account has been temporarily locked for 10 minutes.");
-        delete userSessions[to];
-        return;
-      }
-
-      const attemptsLeft = MAX_LOGIN_ATTEMPTS - session.loginAttempts;
-      await sendTextMessage(to, `UPN not recognized. You have ${attemptsLeft} attempt(s) remaining.`);
-      return;
-    }
-
+    // Format is valid — actual verification happens once PIN is also
+    // collected, via verifyLoginCredentials() (see backend placeholder
+    // note above). Collecting both before checking matches how a real
+    // backend API call would work anyway (one request, not two).
+    session.loginUpn = cleanText;
     session.step = "login_enter_pin";
     await sendTextMessage(to, "Enter PIN:");
     return;
@@ -2319,9 +2403,9 @@ async function handleTextInput(to, text, session) {
       return;
     }
 
-    const user = registeredUsers[to];
+    const result = await verifyLoginCredentials(to, session.loginUpn, cleanText);
 
-    if (!user || !(await verifyPin(cleanText, user.pin))) {
+    if (!result.success) {
       session.loginAttempts = (session.loginAttempts || 0) + 1;
 
       if (session.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
@@ -2332,9 +2416,11 @@ async function handleTextInput(to, text, session) {
       }
 
       const attemptsLeft = MAX_LOGIN_ATTEMPTS - session.loginAttempts;
-      await sendTextMessage(to, `Incorrect PIN. You have ${attemptsLeft} attempt(s) remaining.`);
+      await sendTextMessage(to, `Incorrect UPN or PIN. You have ${attemptsLeft} attempt(s) remaining.`);
       return;
     }
+
+    delete session.loginUpn;
 
     // Correct UPN + PIN — Verification Code is still required before
     // Main Menu (restored per explicit correction — this step stays).
@@ -2630,5 +2716,7 @@ module.exports = {
   DOCUMENT_COST_PER_UNIT,
   getLoginLockoutMinutesRemaining,
   applyLoginLockout,
-  MAX_LOGIN_ATTEMPTS
+  MAX_LOGIN_ATTEMPTS,
+  verifyLoginCredentials,
+  registeredUsers // exposed for test seeding only
 };
