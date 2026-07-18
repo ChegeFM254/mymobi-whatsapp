@@ -401,13 +401,30 @@ async function sendConfirmNewPIN(to) {
 
 async function sendRegistrationComplete(to, session) {
     if (session && session.mobileNumber && session.newPin) {
+        // BUG FIX #11 (interim, pending a real database): previously only
+        // mobileNumber/pin/status/failedPinAttempts were saved here — the
+        // actual KYC fields collected earlier (First Name, Last Name, UPN,
+        // National ID) lived only in the temporary session object and
+        // were lost once that session ended. A "returning user" was only
+        // ever recognized by phone number + PIN, with no memory of who
+        // they actually are. Now the full KYC profile is saved alongside
+        // the login credentials.
+        //
+        // NOTE: this is still in-memory only (see registeredUsers
+        // declaration) and will not survive a server restart/redeploy —
+        // that's the separate, larger persistence gap to be addressed
+        // with a real database.
         registeredUsers[to] = {
+            firstName: session.firstName,
+            lastName: session.lastName,
+            upn: session.upn,
+            nationalId: session.nationalId,
             mobileNumber: session.mobileNumber,
             pin: session.newPin,
             status: "active",
             failedPinAttempts: 0
         };
-        console.log(`User registered: ${session.mobileNumber}`);
+        console.log(`User registered: ${session.firstName} ${session.lastName} (${session.mobileNumber})`);
     }
 
     // Clear sensitive/one-time session data up front, so even if a send
