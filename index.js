@@ -182,17 +182,37 @@ app.get('/webhook', (req, res) => {
 // welcome messages. Fix: never return early past the response — always
 // fall through to res.sendStatus(200).
 app.post('/webhook', async (req, res) => {
+  const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+  if (!message) return res.sendStatus(200);
+
+  // BUG FIX #4: ignore retried/duplicate webhook deliveries for a
+  // message we've already handled — see MESSAGE DEDUPLICATION above.
+  if (isDuplicateMessage(message.id)) {
+    return res.sendStatus(200);
+  }
+
+  // BUG FIX #7: acknowledge the webhook to Meta IMMEDIATELY, before
+  // doing any reply-sending work. Previously this response waited on
+  // the ENTIRE reply chain, including the outbound message queue's
+  // enforced spacing (up to a few seconds — see MIN_GAP_MS). If that
+  // delay pushed our response past Meta's webhook timeout, Meta would
+  // retry delivering the same button tap / message — which, even with
+  // ID-based dedup, can still surface as a confusing double-prompt if
+  // the retry arrives before the original send has fully completed.
+  // Responding first, then doing the work, removes that whole failure
+  // mode: Meta always gets its 200 OK right away, regardless of how
+  // long sending replies takes.
+  res.sendStatus(200);
+
   try {
-    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (!message) return res.sendStatus(200);
-
-    // BUG FIX #4: ignore retried/duplicate webhook deliveries for a
-    // message we've already handled — see MESSAGE DEDUPLICATION above.
-    if (isDuplicateMessage(message.id)) {
-      return res.sendStatus(200);
-    }
-
     const from = message.from;
+
+    // BUG FIX #10: mark the start of a new "turn" for this recipient so
+    // the first reply to THIS incoming message/tap sends immediately,
+    // without being held back by the chained-message spacing rule — see
+    // OUTBOUND MESSAGE QUEUE below.
+    resetSendTurn(from);
+
     const text = message.text?.body || '';
     const lowerText = text.toLowerCase().trim();
     const isTriggerWord = ['hi', 'hello', 'loan', 'start'].includes(lowerText) || lowerText.includes('531');
@@ -210,7 +230,7 @@ app.post('/webhook', async (req, res) => {
     // and typed text, not just text. Previously this only lived inside
     // handleTextInput(), so double-tapping a button had no protection.
     if (session.lastProcessed && (Date.now() - session.lastProcessed < 800)) {
-      return res.sendStatus(200);
+      return;
     }
     session.lastProcessed = Date.now();
 
@@ -226,7 +246,6 @@ app.post('/webhook', async (req, res) => {
   } catch (err) {
     console.error(err);
   }
-  res.sendStatus(200);
 });
 // ==================== SCREENS ====================
 
@@ -837,11 +856,24 @@ async function handleButton(to, id, session) {
     }
   }
   // ==================== AUTHENTICATION MENU (Returning Users) ====================
+  // BUG FIX #8: these three buttons used to unconditionally reset
+  // session.step and resend their prompt, with no check on where the
+  // session actually was. If WhatsApp redelivers the interactive
+  // message (or the button gets tapped more than once), a stale tap
+  // arriving AFTER the user had already moved on — e.g. after correctly
+  // entering their PIN and being sent to "Enter Verification Code" —
+  // would silently reset session.step back to "enter_pin" and resend
+  // "Enter your PIN:", producing two conflicting prompts almost at
+  // once. Each handler now only acts if the session is still actually
+  // sitting at the Auth Menu; anything else is a stale/duplicate tap
+  // and is silently ignored.
   else if (id === "enter_pin") {
+    if (session.step !== "auth_menu") return;
     session.step = "enter_pin";
     await sendTextMessage(to, "Enter your PIN:");
   }
   else if (id === "forgot_pin") {
+    if (session.step !== "auth_menu") return;
     session.step = "forgot_pin";
     session.isPinReset = true; // marks this as a reset flow, not fresh registration
     session.otp = "67890"; // simulated OTP, different from registration OTP
@@ -849,6 +881,7 @@ async function handleButton(to, id, session) {
     await sendTextMessage(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
   }
   else if (id === "opt_out") {
+    if (session.step !== "auth_menu") return;
     session.step = "opt_out_confirmation";
     await sendTextMessage(to, "You are about to OPT OUT of Emergency Loan Services.\n\nDo you want to proceed? (Yes/No)");
   }
@@ -939,8 +972,8 @@ async function handleButton(to, id, session) {
     await sendApproveLoanDetails(to, session);
   }
   else if (id === "confirm_approve_loan") {
-    session.step = "enter_approval_payroll_number";
-    await sendTextMessage(to, "Enter Payroll Number:");
+    session.step = "enter_approval_code";
+    await sendTextMessage(to, "Enter Approval Code:");
   }
   // ==================== CANCEL LOAN ====================
   else if (id === "cancel_loan") {
@@ -988,12 +1021,20 @@ async function handleButton(to, id, session) {
     }
 
     loan.installmentsPaid += installments;
-    if (loan.installmentsPaid >= loan.tenureMonths) {
+    const totalObligation = loan.breakdown.monthlyInstallment * loan.tenureMonths;
+    const remainingBalance = totalObligation - (loan.breakdown.monthlyInstallment * loan.installmentsPaid);
+    const isFullyPaid = loan.installmentsPaid >= loan.tenureMonths;
+
+    if (isFullyPaid) {
       loan.status = "paid";
     }
     delete session.pendingPaymentInstallments;
 
-    await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. Thank you for using MyMobi services.`);
+    if (isFullyPaid) {
+      await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. Your loan has been fully paid. Thank you for using MyMobi services.`);
+    } else {
+      await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. You have a loan balance of KES ${remainingBalance.toLocaleString()}. Thank you for using MyMobi services.`);
+    }
     await sendMainMenu(to, session);
   }
   else if (id === "get_payslip") {
@@ -1181,19 +1222,16 @@ async function handleTextInput(to, text, session) {
   }
 
   // =====================================================
-  // APPROVE LOAN: PAYROLL NUMBER + APPROVAL CODE
+  // APPROVE LOAN: APPROVAL CODE + PAYROLL NUMBER
   // =====================================================
-  if (step === "enter_approval_payroll_number") {
-    if (!cleanText) {
-      await sendTextMessage(to, "Please enter your Payroll Number.");
-      return;
-    }
-    session.approvalPayrollNumber = cleanText;
-    session.step = "enter_approval_code";
-    await sendTextMessage(to, "Enter Approval Code:");
-    return;
-  }
-
+  // BUG FIX #9: order swapped per user feedback — the approval code is
+  // the thing the user JUST received (via the simulated SMS message),
+  // so they naturally want to enter that first. Previously Payroll
+  // Number was asked first, which meant the code the user was holding
+  // onto got typed into the wrong prompt, or the payroll prompt arrived
+  // confusingly after they'd already entered the code. Approval Code is
+  // now validated first; Payroll Number is asked for only after a
+  // correct code, and completing that is what finalizes the approval.
   if (step === "enter_approval_code") {
     const loan = currentLoans[to];
 
@@ -1209,24 +1247,43 @@ async function handleTextInput(to, text, session) {
     }
 
     if (cleanText === loan.approvalCode) {
-      loan.status = "approved";
-      loan.approvedAt = new Date().toISOString();
-      delete session.approvalPayrollNumber;
-
-      await sendTextMessage(to, "Your loan approval has been received and is being processed. Please wait for an SMS notification from MyMobi.");
-      await sendMainMenu(to, session);
+      session.step = "enter_approval_payroll_number";
+      await sendTextMessage(to, "Enter Payroll Number:");
     } else {
       loan.approvalCodeAttempts = (loan.approvalCodeAttempts || 0) + 1;
 
       if (loan.approvalCodeAttempts >= 3) {
         await sendTextMessage(to, "Too many incorrect attempts. Please try again later.");
-        delete session.approvalPayrollNumber;
         await sendEmergencyLoanMenu(to, session);
       } else {
         const attemptsLeft = 3 - loan.approvalCodeAttempts;
         await sendTextMessage(to, `Incorrect code. You have ${attemptsLeft} attempt(s) remaining.`);
       }
     }
+    return;
+  }
+
+  if (step === "enter_approval_payroll_number") {
+    const loan = currentLoans[to];
+
+    if (!loan || loan.status !== "pending_approval") {
+      await sendTextMessage(to, "That loan application is no longer pending. Let's start again.");
+      await sendEmergencyLoanMenu(to, session);
+      return;
+    }
+
+    if (!cleanText) {
+      await sendTextMessage(to, "Please enter your Payroll Number.");
+      return;
+    }
+
+    session.approvalPayrollNumber = cleanText;
+    loan.status = "approved";
+    loan.approvedAt = new Date().toISOString();
+    delete session.approvalPayrollNumber;
+
+    await sendTextMessage(to, "Your loan approval has been received and is being processed. Please wait for an SMS notification from MyMobi.");
+    await sendMainMenu(to, session);
     return;
   }
 
@@ -1464,7 +1521,14 @@ function sleep(ms) {
 // recipient. The queue:
 //   1. Sends messages to a given recipient strictly one at a time.
 //   2. Enforces a minimum gap since the last successful send to that
-//      recipient, enforced centrally — no per-call-site sleep() needed.
+//      recipient — BUT ONLY between messages the BOT chains together on
+//      its own within a single incoming-message "turn" (e.g. "Registration
+//      Complete" immediately followed by "Main Menu"). The FIRST reply to
+//      a fresh incoming message/button tap always sends immediately,
+//      since real time already passed while the person was reading the
+//      previous screen and deciding what to tap — throttling that first
+//      reply only adds a perceptible, pointless lag between tap and
+//      response (BUG FIX #10).
 //   3. Automatically retries with exponential backoff specifically when
 //      WhatsApp responds with a rate-limit error (131056 or 130429),
 //      instead of silently dropping the message and leaving the session
@@ -1472,12 +1536,15 @@ function sleep(ms) {
 //
 // This is the single place that governs message pacing — nowhere else
 // in the code should call axios directly or add its own delays.
+//
+// resetSendTurn(to) is called once at the top of the webhook handler,
+// for every fresh incoming message, before any reply is sent.
 
-const MIN_GAP_MS = 3000;          // minimum spacing between messages to the same recipient
+const MIN_GAP_MS = 3000;          // minimum spacing between CHAINED messages in the same turn
 const MAX_SEND_RETRIES = 4;
 const BASE_RETRY_DELAY_MS = 4000; // doubles each retry: 4s, 8s, 16s, 32s
 
-const recipientQueues = new Map(); // "to" phone number -> { tail: Promise, lastSentAt: number }
+const recipientQueues = new Map(); // "to" phone number -> { tail: Promise, lastSentAt: number, turnMessageCount: number }
 
 // Prevent recipientQueues from growing forever on a long-running server —
 // numbers that haven't messaged in a while are safe to forget, since a
@@ -1492,15 +1559,29 @@ setInterval(() => {
   }
 }, 15 * 60 * 1000); // sweep every 15 minutes
 
+function resetSendTurn(to) {
+  const state = recipientQueues.get(to) || { tail: Promise.resolve(), lastSentAt: 0, turnMessageCount: 0 };
+  state.turnMessageCount = 0;
+  recipientQueues.set(to, state);
+}
+
 function sendMessage(to, payload) {
-  const state = recipientQueues.get(to) || { tail: Promise.resolve(), lastSentAt: 0 };
+  const state = recipientQueues.get(to) || { tail: Promise.resolve(), lastSentAt: 0, turnMessageCount: 0 };
+
+  // Captured synchronously at enqueue time, in call order — the Nth
+  // sendMessage() call within the current turn knows its own position
+  // even though the actual send is deferred until the queue reaches it.
+  const isFirstInTurn = state.turnMessageCount === 0;
+  state.turnMessageCount++;
 
   const task = state.tail
     .catch(() => {}) // never let a prior failure break the chain for this recipient
     .then(async () => {
-      const elapsed = Date.now() - state.lastSentAt;
-      if (elapsed < MIN_GAP_MS) {
-        await sleep(MIN_GAP_MS - elapsed);
+      if (!isFirstInTurn) {
+        const elapsed = Date.now() - state.lastSentAt;
+        if (elapsed < MIN_GAP_MS) {
+          await sleep(MIN_GAP_MS - elapsed);
+        }
       }
       await sendWithRetry(to, payload);
       state.lastSentAt = Date.now();
