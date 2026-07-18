@@ -1,7 +1,10 @@
 require('dotenv').config();
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
+const rateLimit = require('express-rate-limit');
 
 // ============================================================================
 // STANDING CONVENTION — READ BEFORE ADDING ANY NEW SCREEN
@@ -28,12 +31,112 @@ const PORT = process.env.PORT || 3000;
 const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'mymobi_test_123';
+// Optional for now — see webhook signature verification below. Find this
+// in Meta App Dashboard -> App Settings -> Basic -> App Secret. Different
+// from your access token.
+const APP_SECRET = process.env.WHATSAPP_APP_SECRET;
 
 if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) {
-  console.warn('⚠️  WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID is not set. Create a .env file (see .env.example).');
+  logWarn('config_missing', { missing: 'WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID', message: '⚠️  WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID is not set. Create a .env file (see .env.example).' });
+}
+if (!APP_SECRET) {
+  logWarn('webhook_signature_verification_disabled', { reason: 'WHATSAPP_APP_SECRET not set', message: '⚠️  WHATSAPP_APP_SECRET is not set — webhook signature verification is DISABLED. Anyone who finds this URL can currently send fake webhook events. Set WHATSAPP_APP_SECRET when you are ready to lock this down (see .env.example). This warning does not block testing.' });
 }
 
-app.use(bodyParser.json());
+// bodyParser's `verify` callback captures the raw request bytes before
+// JSON parsing — required because signature verification (below) must
+// hash the exact bytes Meta sent, not our re-serialized parsed copy of
+// them (which can differ in whitespace/key order and would never match).
+app.use(bodyParser.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
+
+// ==================== ITEM 4: SERVER-LEVEL RATE LIMITING ====================
+// Separate from the outbound message queue (which paces OUR replies to
+// WhatsApp) — this protects the server itself from being hammered with
+// requests directly, whether by accident, misconfiguration, or abuse.
+// 120 requests/minute per IP comfortably covers legitimate WhatsApp
+// webhook traffic (Meta's servers) while blocking abusive volumes.
+const webhookRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many requests.'
+});
+app.use('/webhook', webhookRateLimiter);
+
+// ==================== ITEM 1: WEBHOOK SIGNATURE VERIFICATION ====================
+// Meta signs every real webhook POST with an HMAC-SHA256 signature (the
+// X-Hub-Signature-256 header), computed using your App Secret. Verifying
+// it proves the request genuinely came from Meta — without this, anyone
+// who finds this URL could POST fake "messages" claiming to be from any
+// phone number.
+//
+// Graceful by design: if APP_SECRET isn't set yet, verification is
+// skipped with a warning (already logged above at startup) rather than
+// rejecting requests — so this doesn't block your current testing. Once
+// WHATSAPP_APP_SECRET is set in your environment, verification becomes
+// mandatory and any request with a missing/invalid signature is rejected.
+function isValidWebhookSignature(req) {
+  if (!APP_SECRET) {
+    return true; // not configured yet — see warning above
+  }
+
+  const signatureHeader = req.get('X-Hub-Signature-256');
+  if (!signatureHeader || !req.rawBody) {
+    return false;
+  }
+
+  const expectedSignature = 'sha256=' + crypto
+    .createHmac('sha256', APP_SECRET)
+    .update(req.rawBody)
+    .digest('hex');
+
+  // Constant-time comparison — prevents timing attacks that could let an
+  // attacker guess the correct signature one byte at a time.
+  const a = Buffer.from(signatureHeader);
+  const b = Buffer.from(expectedSignature);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+// ==================== ITEM 2: PIN HASHING ====================
+// PINs are never stored or compared as plain text. hashPin() is used
+// once, when a PIN is first saved (registration or reset); verifyPin()
+// is used every time a returning user types their PIN to log in — it
+// hashes what they typed and compares hashes, never the raw PIN itself.
+// A leaked database no longer exposes anyone's actual PIN.
+const PIN_SALT_ROUNDS = 10;
+
+// ==================== ITEM 9: STRUCTURED LOGGING ====================
+// Plain console.log/error scattered through the code is hard to search
+// and impossible to filter by severity or event type once there's real
+// volume. This wraps every log line in a consistent JSON shape — still
+// visible in Render's existing log viewer exactly as before, but now
+// greppable/parseable by a future log aggregation tool without needing
+// any new external service today.
+function log(level, event, data = {}) {
+  const entry = { timestamp: new Date().toISOString(), level, event, ...data };
+  const line = JSON.stringify(entry);
+  if (level === 'error') console.error(line);
+  else if (level === 'warn') console.warn(line);
+  else console.log(line);
+}
+function logInfo(event, data) { log('info', event, data); }
+function logWarn(event, data) { log('warn', event, data); }
+function logError(event, data) { log('error', event, data); }
+
+async function hashPin(plainPin) {
+  return bcrypt.hash(plainPin, PIN_SALT_ROUNDS);
+}
+
+async function verifyPin(plainPin, storedHash) {
+  if (!storedHash) return false;
+  return bcrypt.compare(plainPin, storedHash);
+}
 
 const userSessions = {};
 
@@ -105,10 +208,45 @@ function generateFiveDigitCode() {
   return String(Math.floor(10000 + Math.random() * 90000)); // 5 digits
 }
 
+// ==================== KYC FIELD VALIDATION RULES ====================
+// Shared between initial entry and the Edit Details flow, so both paths
+// enforce identical rules and can't drift out of sync with each other.
+function isValidUpn(text) {
+  // Up to 11 digits, must start with 1 or 2.
+  return /^[12]\d{0,10}$/.test(text);
+}
+
+function isValidNationalId(text) {
+  // Exactly 8 digits, cannot start with 0.
+  return /^[1-9]\d{7}$/.test(text);
+}
+
+function isValidMobileNumber(text) {
+  // Either 10 digits starting with 0 (e.g. 0722730336), or 12 digits
+  // starting with the 254 country code (e.g. 254722730336).
+  return /^(0\d{9}|254\d{9})$/.test(text);
+}
+
+const UPN_ERROR_MESSAGE = "UPN should be up to 11 digits and start with 1 or 2. Please try again.";
+const NATIONAL_ID_ERROR_MESSAGE = "National ID should be exactly 8 digits and cannot start with 0. Please try again.";
+const MOBILE_NUMBER_ERROR_MESSAGE = "Mobile Number should be 10 digits starting with 0 (e.g. 0722730336) or 12 digits starting with 254 (e.g. 254722730336). Please try again.";
+
 function computeDueDate(tenureMonths) {
   const due = new Date();
   due.setMonth(due.getMonth() + tenureMonths);
   return due.toISOString().split('T')[0]; // YYYY-MM-DD
+}
+
+// ITEM 10 (reusability win, found while adding tests): this exact math
+// used to be duplicated with slightly different-looking expressions in
+// two places (the pre-payment preview screen and the post-payment
+// confirmation) — mathematically equivalent, but two places that could
+// silently drift apart from each other if one was ever edited without
+// the other. Pulled into one pure, easily unit-tested function instead.
+function calculateLoanBalance(monthlyInstallment, tenureMonths, installmentsPaidSoFar) {
+  const totalObligation = monthlyInstallment * tenureMonths;
+  const remainingBalance = totalObligation - (monthlyInstallment * installmentsPaidSoFar);
+  return { totalObligation, remainingBalance };
 }
 
 // TODO: replace with a real Safaricom Daraja API STK Push integration
@@ -118,7 +256,7 @@ function computeDueDate(tenureMonths) {
 // returning a result object so swapping in the real API call later
 // requires no changes at the call site.
 async function triggerMpesaStkPush(to, amount) {
-  console.log(`[SIMULATED] M-Pesa STK Push triggered for ${to}: KES ${amount}`);
+  logInfo('mpesa_stk_push_simulated', { to, amount });
   return { success: true };
 }
 
@@ -173,6 +311,17 @@ function resetTimeout(from) {
   }, 60000); // 60 seconds
 }
 
+// ==================== ITEM 6: HEALTH CHECK ====================
+// Lightweight endpoint for Render's own health checks and any future
+// uptime-monitoring tool — deliberately does nothing except confirm the
+// process is up and responding, with no dependency on WhatsApp config.
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'ok', service: 'mymobi-whatsapp-bot' });
+});
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', service: 'mymobi-whatsapp-bot' });
+});
+
 app.get('/webhook', (req, res) => {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
     res.send(req.query['hub.challenge']);
@@ -188,6 +337,11 @@ app.get('/webhook', (req, res) => {
 // welcome messages. Fix: never return early past the response — always
 // fall through to res.sendStatus(200).
 app.post('/webhook', async (req, res) => {
+  if (!isValidWebhookSignature(req)) {
+    logWarn('webhook_signature_rejected', {});
+    return res.sendStatus(403);
+  }
+
   const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
   if (!message) return res.sendStatus(200);
 
@@ -240,6 +394,39 @@ app.post('/webhook', async (req, res) => {
     }
     session.lastProcessed = Date.now();
 
+    // ==================== ITEM 7: DATA DELETION REQUEST ====================
+    // Works from ANY screen/step, mirroring the trigger-word pattern
+    // above — a data-protection request shouldn't require navigating to
+    // a specific menu first. Deletes registration, loan history, and
+    // session data for this number. NOTE: since storage is still
+    // in-memory (see registeredUsers declaration), this deletes the data
+    // that currently exists; it isn't yet backed by durable storage that
+    // itself needs a formal deletion/retention policy — that comes with
+    // the database migration.
+    const isDeletionRequest = ['delete my data', 'delete my account'].includes(lowerText);
+    if (isDeletionRequest) {
+      session.step = 'confirm_data_deletion';
+      await sendDataDeletionConfirm(from, session);
+      return;
+    }
+    if (session.step === 'confirm_data_deletion' && text) {
+      const response = lowerText;
+      if (response === 'yes' || response === 'y') {
+        delete registeredUsers[from];
+        delete currentLoans[from];
+        delete loanApplications[from];
+        logInfo('data_deletion_completed', { to: from });
+        await sendTextMessage(from, "Your data has been permanently deleted from MyMobi. If you'd like to use the service again, just say Hi.");
+        delete userSessions[from];
+      } else if (response === 'no' || response === 'n') {
+        await sendTextMessage(from, "Data deletion cancelled. Your information has not been changed.");
+        await sendWelcome(from);
+      } else {
+        await sendTextMessage(from, "Please reply with Yes or No.");
+      }
+      return;
+    }
+
     // Only show Welcome page once per fresh session
     if (isTriggerWord && session.step === 'welcome' && session.isNewSession === true) {
       await sendWelcome(from);
@@ -250,10 +437,17 @@ app.post('/webhook', async (req, res) => {
       await handleTextInput(from, text, session);
     }
   } catch (err) {
-    console.error(err);
+    logError('webhook_handler_error', { message: err.message, stack: err.stack });
   }
 });
 // ==================== SCREENS ====================
+
+// ITEM 7: data deletion confirmation. Plain text Yes/No (not buttons),
+// matching the existing convention used for opt_out_confirmation and
+// cancel_loan — consistent with how confirmations already work here.
+async function sendDataDeletionConfirm(to, session) {
+  await sendTextMessage(to, "⚠️ Are you sure you want to permanently delete all your MyMobi data (registration, loans, everything)? This cannot be undone.\n\nReply Yes or No.");
+}
 
 async function sendWelcome(to) {
   const payload = {
@@ -436,11 +630,11 @@ async function sendRegistrationComplete(to, session) {
             upn: session.upn,
             nationalId: session.nationalId,
             mobileNumber: session.mobileNumber,
-            pin: session.newPin,
+            pin: await hashPin(session.newPin), // ITEM 2: never store the raw PIN
             status: "active",
             failedPinAttempts: 0
         };
-        console.log(`User registered: ${session.firstName} ${session.lastName} (${session.mobileNumber})`);
+        logInfo('user_registered', { to, firstName: session.firstName, lastName: session.lastName, mobileNumber: session.mobileNumber });
     }
 
     // Clear sensitive/one-time session data up front, so even if a send
@@ -472,10 +666,10 @@ async function sendRegistrationComplete(to, session) {
 async function sendPinResetComplete(to, session) {
   const user = registeredUsers[to];
   if (user && session.newPin) {
-    user.pin = session.newPin;
+    user.pin = await hashPin(session.newPin); // ITEM 2: never store the raw PIN
     user.failedPinAttempts = 0;
     user.status = "active";
-    console.log(`PIN reset for user: ${to}`);
+    logInfo('pin_reset', { to });
   }
 
   if (userSessions[to]) {
@@ -800,8 +994,11 @@ async function sendPayLoanConfirm(to, session, installmentsToPay) {
 
   const loan = currentLoans[to];
   const payAmount = loan.breakdown.monthlyInstallment * installmentsToPay;
-  const totalOwed = loan.breakdown.monthlyInstallment * (loan.tenureMonths - loan.installmentsPaid);
-  const balance = totalOwed - payAmount;
+  const { remainingBalance: balance } = calculateLoanBalance(
+    loan.breakdown.monthlyInstallment,
+    loan.tenureMonths,
+    loan.installmentsPaid + installmentsToPay
+  );
 
   session.pendingPaymentInstallments = installmentsToPay;
 
@@ -1087,34 +1284,51 @@ async function handleButton(to, id, session) {
       return;
     }
 
-    const payAmount = loan.breakdown.monthlyInstallment * installments;
-    const stkResult = await triggerMpesaStkPush(to, payAmount);
-
-    if (!stkResult.success) {
-      await sendTextMessage(to, "Payment could not be processed. Please try again.");
+    // ITEM 8: idempotency guard. Without this, a double-tap on "Proceed"
+    // (or a duplicate webhook delivery of the same tap) could trigger
+    // the M-Pesa STK Push — and the resulting installmentsPaid update —
+    // TWICE for what the user experienced as a single action. This is a
+    // well-known class of bug in payment flows generally. The flag is
+    // cleared in every exit path below (success, failure, or error) so
+    // it can never get stuck "true" forever.
+    if (loan.paymentInProgress) {
+      await sendTextMessage(to, "Your payment is already being processed. Please wait.");
       return;
     }
+    loan.paymentInProgress = true;
 
-    loan.installmentsPaid += installments;
-    const totalObligation = loan.breakdown.monthlyInstallment * loan.tenureMonths;
-    const remainingBalance = totalObligation - (loan.breakdown.monthlyInstallment * loan.installmentsPaid);
-    const isFullyPaid = loan.installmentsPaid >= loan.tenureMonths;
+    let payAmount;
+    try {
+      payAmount = loan.breakdown.monthlyInstallment * installments;
+      const stkResult = await triggerMpesaStkPush(to, payAmount);
 
-    if (isFullyPaid) {
-      loan.status = "paid";
-    }
-    delete session.pendingPaymentInstallments;
+      if (!stkResult.success) {
+        await sendTextMessage(to, "Payment could not be processed. Please try again.");
+        return;
+      }
 
-    if (isFullyPaid) {
-      await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. Your loan has been fully paid. Thank you for using MyMobi services.`);
-      // Loan fully settled — that "session" with this loan is over, so
-      // send the user back to Welcome/Home rather than the Main Menu.
-      await sendWelcome(to);
-    } else {
-      await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. You have a loan balance of KES ${remainingBalance.toLocaleString()}. Thank you for using MyMobi services.`);
-      // Balance remains — keep the user in the Main Menu since they may
-      // still have more loan-related actions available.
-      await sendMainMenu(to, session);
+      loan.installmentsPaid += installments;
+      const { remainingBalance } = calculateLoanBalance(loan.breakdown.monthlyInstallment, loan.tenureMonths, loan.installmentsPaid);
+      const isFullyPaid = loan.installmentsPaid >= loan.tenureMonths;
+
+      if (isFullyPaid) {
+        loan.status = "paid";
+      }
+      delete session.pendingPaymentInstallments;
+
+      if (isFullyPaid) {
+        await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. Your loan has been fully paid. Thank you for using MyMobi services.`);
+        // Loan fully settled — that "session" with this loan is over, so
+        // send the user back to Welcome/Home rather than the Main Menu.
+        await sendWelcome(to);
+      } else {
+        await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. You have a loan balance of KES ${remainingBalance.toLocaleString()}. Thank you for using MyMobi services.`);
+        // Balance remains — keep the user in the Main Menu since they may
+        // still have more loan-related actions available.
+        await sendMainMenu(to, session);
+      }
+    } finally {
+      loan.paymentInProgress = false;
     }
   }
   else if (id === "get_payslip") {
@@ -1190,6 +1404,10 @@ async function handleTextInput(to, text, session) {
         await sendTextMessage(to, "Please enter your UPN.");
         return;
       }
+      if (!isValidUpn(cleanText)) {
+        await sendTextMessage(to, UPN_ERROR_MESSAGE);
+        return;
+      }
       session.upn = cleanText;
       session.step = "national_id";
       await sendTextMessage(to, "Enter National ID Number");
@@ -1201,6 +1419,10 @@ async function handleTextInput(to, text, session) {
         await sendTextMessage(to, "Please enter your National ID Number.");
         return;
       }
+      if (!isValidNationalId(cleanText)) {
+        await sendTextMessage(to, NATIONAL_ID_ERROR_MESSAGE);
+        return;
+      }
       session.nationalId = cleanText;
       session.step = "mobile_number";
       await sendTextMessage(to, "Enter Mobile Number (Mpesa)");
@@ -1210,6 +1432,10 @@ async function handleTextInput(to, text, session) {
     if (step === "mobile_number") {
       if (!cleanText) {
         await sendTextMessage(to, "Please enter your Mobile Number (Mpesa).");
+        return;
+      }
+      if (!isValidMobileNumber(cleanText)) {
+        await sendTextMessage(to, MOBILE_NUMBER_ERROR_MESSAGE);
         return;
       }
       session.mobileNumber = cleanText;
@@ -1230,8 +1456,8 @@ async function handleTextInput(to, text, session) {
 
     const amount = parseInt(cleanText, 10);
 
-    if (amount <= 0) {
-      await sendTextMessage(to, "Please enter a loan amount greater than 0.");
+    if (amount < 1000) {
+      await sendTextMessage(to, "Minimum loan amount is KES 1,000. Please enter a higher amount.");
       return;
     }
 
@@ -1281,7 +1507,7 @@ async function handleTextInput(to, text, session) {
     if (!loanApplications[to]) loanApplications[to] = [];
     loanApplications[to].push({ ...currentLoans[to] });
 
-    console.log(`Loan application submitted by ${to}: KES ${session.loanAmount} over ${session.loanTenureMonths} month(s), Ref ${refNo}, approval code ${approvalCode} (simulated)`);
+    logInfo('loan_application_submitted', { to, loanAmount: session.loanAmount, tenureMonths: session.loanTenureMonths, refNo, approvalCode });
 
     await sendTextMessage(to, "Your loan request has been submitted. Please wait for an SMS from MyMobi.");
 
@@ -1310,7 +1536,7 @@ async function handleTextInput(to, text, session) {
       try {
         const stillPending = currentLoans[to] && currentLoans[to].refNo === refNo && currentLoans[to].status === "pending_approval";
         if (!stillPending) {
-          console.log(`Skipped stale simulated approval code delivery for ${to} (Ref ${refNo}) — loan no longer pending.`);
+          logInfo('stale_approval_code_delivery_skipped', { to, refNo });
           return;
         }
         await sendTextMessage(to, `Approval Code ${approvalCode}`);
@@ -1348,7 +1574,7 @@ async function handleTextInput(to, text, session) {
       return;
     }
 
-    console.log(`Approval code check for ${to}: received "${cleanText}", expected "${loan.approvalCode}" (Ref ${loan.refNo})`);
+    logInfo('approval_code_check', { to, refNo: loan.refNo, received: cleanText, expected: loan.approvalCode, matched: cleanText === loan.approvalCode });
 
     if (cleanText === loan.approvalCode) {
       session.step = "enter_approval_payroll_number";
@@ -1401,6 +1627,23 @@ async function handleTextInput(to, text, session) {
     }
 
     const field = step.replace("edit_", "");
+
+    // Same numeric validation as the initial KYC entry — an edit
+    // shouldn't be able to introduce a non-numeric value that the
+    // first-time entry would have rejected.
+    if (field === "upn" && !isValidUpn(cleanText)) {
+      await sendTextMessage(to, UPN_ERROR_MESSAGE);
+      return;
+    }
+    if (field === "nationalid" && !isValidNationalId(cleanText)) {
+      await sendTextMessage(to, NATIONAL_ID_ERROR_MESSAGE);
+      return;
+    }
+    if (field === "mobilenumber" && !isValidMobileNumber(cleanText)) {
+      await sendTextMessage(to, MOBILE_NUMBER_ERROR_MESSAGE);
+      return;
+    }
+
     if (field === "firstname") session.firstName = cleanText;
     if (field === "lastname") session.lastName = cleanText;
     if (field === "upn") session.upn = cleanText;
@@ -1495,7 +1738,7 @@ async function handleTextInput(to, text, session) {
       return;
     }
 
-    if (cleanText === user.pin) {
+    if (await verifyPin(cleanText, user.pin)) {
       user.failedPinAttempts = 0;
       session.step = "enter_verification_code";
       session.verificationCode = generateFiveDigitCode();
@@ -1600,7 +1843,7 @@ async function handleTextInput(to, text, session) {
       return;
     }
 
-    if (cleanText === user.pin) {
+    if (await verifyPin(cleanText, user.pin)) {
       user.status = "opted_out";
       delete user.pin;
       await sendTextMessage(to, "You have been successfully opted out of the Emergency Loan service.");
@@ -1671,7 +1914,7 @@ const recipientQueues = new Map(); // "to" phone number -> { tail: Promise, last
 // numbers that haven't messaged in a while are safe to forget, since a
 // fresh entry is created automatically the next time they do.
 const QUEUE_ENTRY_TTL_MS = 60 * 60 * 1000; // 1 hour
-setInterval(() => {
+const queueCleanupInterval = setInterval(() => {
   const now = Date.now();
   for (const [to, state] of recipientQueues) {
     if (now - state.lastSentAt > QUEUE_ENTRY_TTL_MS) {
@@ -1679,6 +1922,13 @@ setInterval(() => {
     }
   }
 }, 15 * 60 * 1000); // sweep every 15 minutes
+// .unref() means this background housekeeping timer, on its own, never
+// keeps the process alive — the live HTTP server (app.listen) is what
+// actually does that during normal operation. This only matters when
+// nothing else is holding the event loop open: it lets a test process
+// that require()'s this file (without starting a real server) exit
+// cleanly, and it's the correct pattern for graceful shutdown generally.
+queueCleanupInterval.unref();
 
 function resetSendTurn(to) {
   const state = recipientQueues.get(to) || { tail: Promise.resolve(), lastSentAt: 0, turnMessageCount: 0 };
@@ -1716,7 +1966,8 @@ function sendMessage(to, payload) {
 async function sendWithRetry(to, payload, attempt = 0) {
   try {
     await axios.post(`https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`, payload, {
-      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
+      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+      timeout: 10000 // ITEM 5: don't let a hung WhatsApp API call block indefinitely
     });
   } catch (err) {
     const errorCode = err.response?.data?.error?.code;
@@ -1724,12 +1975,12 @@ async function sendWithRetry(to, payload, attempt = 0) {
 
     if (isRateLimitError && attempt < MAX_SEND_RETRIES) {
       const delay = BASE_RETRY_DELAY_MS * Math.pow(2, attempt);
-      console.warn(`Rate limited sending to ${to} (code ${errorCode}). Retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_SEND_RETRIES})`);
+      logWarn('rate_limited_retry', { to, errorCode, delayMs: delay, attempt: attempt + 1, maxRetries: MAX_SEND_RETRIES });
       await sleep(delay);
       return sendWithRetry(to, payload, attempt + 1);
     }
 
-    console.error("Send failed:", err.response?.data || err.message);
+    logError('send_failed', { to, error: err.response?.data || err.message });
     // Deliberately not re-thrown: a failed send (after retries) shouldn't
     // crash the webhook handler. Session state for this bot is already
     // updated in memory before messages are sent (see
@@ -1738,4 +1989,50 @@ async function sendWithRetry(to, payload, attempt = 0) {
   }
 }
 
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+// ==================== ITEM 3: CRASH PROTECTION ====================
+// Without these, an error that slips past a try/catch anywhere in the
+// app (an "unhandled" rejection or exception) crashes the ENTIRE Node
+// process — dropping every user's session at once, not just the one
+// request that hit the error. These log the error and keep the server
+// running instead.
+process.on('unhandledRejection', (reason) => {
+  // Deliberately plain console.error, not logInfo/logError: these two
+  // handlers catch truly unexpected, catastrophic errors, and calling
+  // back into other app code (even a logging helper) from inside a
+  // crash handler carries some risk if the crash itself corrupted
+  // shared state. Simplicity here is a feature, not an oversight.
+  console.error('Unhandled Promise Rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  // Deliberately NOT exiting: for this bot, staying up and serving other
+  // users' sessions is preferable to a hard crash over one bad request.
+});
+
+// ITEM 10: only actually start listening when this file is run directly
+// (`node index.js`), not when it's require()'d by a test file — this is
+// the standard Node.js pattern for making a server file testable without
+// tests fighting over a real port or hanging the test run.
+if (require.main === module) {
+  app.listen(PORT, () => logInfo('server_started', { port: PORT }));
+}
+
+// Exported ONLY for automated tests (see tests/logic.test.js). These are
+// the pure, self-contained pieces of business logic — no WhatsApp
+// sending, no session state — which is exactly what makes them safe and
+// meaningful to unit test without a real WhatsApp connection.
+module.exports = {
+  isValidUpn,
+  isValidNationalId,
+  isValidMobileNumber,
+  generateLoanRefNo,
+  generateApprovalCode,
+  generateFiveDigitCode,
+  computeDueDate,
+  calculateLoanBalance,
+  getLoanBreakdown,
+  hashPin,
+  verifyPin,
+  PLATFORM_FEE_PER_MONTH
+};
