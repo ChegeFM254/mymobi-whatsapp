@@ -1,0 +1,30 @@
+name: Run Tests
+
+# Runs automatically on every push and every pull request, so a mistake
+# gets caught here — before it ever reaches Render — rather than being
+# discovered by a real user in production.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run test suite
+        run: npm test
