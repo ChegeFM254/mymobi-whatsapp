@@ -1480,6 +1480,37 @@ async function handleTextInput(to, text, session) {
       return;
     }
 
+    // SECURITY FIX: this used to accept ANY non-empty text here — no
+    // format check, and critically, no comparison against anything.
+    // Meanwhile PIN is cryptographically verified against a stored hash
+    // with attempt limits. Payroll Number is effectively the same
+    // identifier as the UPN collected at registration, so it now has to
+    // actually MATCH the person's registered UPN — turning this from a
+    // no-op text box into a genuine identity check, consistent with how
+    // every other sensitive step in this app already works.
+    const registeredUser = registeredUsers[to];
+
+    if (!isValidUpn(cleanText)) {
+      await sendTextMessage(to, UPN_ERROR_MESSAGE);
+      return;
+    }
+
+    if (!registeredUser || cleanText !== registeredUser.upn) {
+      session.payrollNumberAttempts = (session.payrollNumberAttempts || 0) + 1;
+
+      if (session.payrollNumberAttempts >= 3) {
+        await sendTextMessage(to, "Too many incorrect attempts. Your loan application has been cancelled for your security.");
+        delete session.payrollNumberAttempts;
+        await sendEmergencyLoanMenu(to, session);
+        return;
+      }
+
+      const attemptsLeft = 3 - session.payrollNumberAttempts;
+      await sendTextMessage(to, `That Payroll Number doesn't match our records. You have ${attemptsLeft} attempt(s) remaining.`);
+      return;
+    }
+
+    delete session.payrollNumberAttempts;
     session.payrollNumber = cleanText;
 
     const refNo = generateLoanRefNo();
@@ -1604,6 +1635,31 @@ async function handleTextInput(to, text, session) {
 
     if (!cleanText) {
       await sendTextMessage(to, "Please enter your Payroll Number.");
+      return;
+    }
+
+    // SECURITY FIX: same gap as Apply Loan's payroll number step — this
+    // used to approve the loan on ANY non-empty text, with no check
+    // against anything. Now it must match the registered UPN, with the
+    // same 3-attempt limit used everywhere else in this app.
+    const registeredUser = registeredUsers[to];
+
+    if (!isValidUpn(cleanText)) {
+      await sendTextMessage(to, UPN_ERROR_MESSAGE);
+      return;
+    }
+
+    if (!registeredUser || cleanText !== registeredUser.upn) {
+      loan.approvalPayrollAttempts = (loan.approvalPayrollAttempts || 0) + 1;
+
+      if (loan.approvalPayrollAttempts >= 3) {
+        await sendTextMessage(to, "Too many incorrect attempts. Please try approving your loan again later.");
+        await sendEmergencyLoanMenu(to, session);
+        return;
+      }
+
+      const attemptsLeft = 3 - loan.approvalPayrollAttempts;
+      await sendTextMessage(to, `That Payroll Number doesn't match our records. You have ${attemptsLeft} attempt(s) remaining.`);
       return;
     }
 
