@@ -99,6 +99,12 @@ function generateApprovalCode() {
   return String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
 }
 
+// Used for registration OTP and returning-user Verification Code, which
+// are both validated as 5 digits elsewhere in this file.
+function generateFiveDigitCode() {
+  return String(Math.floor(10000 + Math.random() * 90000)); // 5 digits
+}
+
 function computeDueDate(tenureMonths) {
   const due = new Date();
   due.setMonth(due.getMonth() + tenureMonths);
@@ -893,9 +899,26 @@ async function handleButton(to, id, session) {
     if (session.step !== "auth_menu") return;
     session.step = "forgot_pin";
     session.isPinReset = true; // marks this as a reset flow, not fresh registration
-    session.otp = "67890"; // simulated OTP, different from registration OTP
+    session.otp = generateFiveDigitCode();
     session.otpAttempts = 0;
     await sendTextMessage(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
+
+    // TODO: remove once a real SMS/backend delivers this. Simulated
+    // delivery arrives as a separate WhatsApp message 5 seconds later,
+    // matching the Approval Code / registration OTP / Verification Code
+    // pattern.
+    const otpForDelivery = session.otp;
+    setTimeout(async () => {
+      try {
+        // Guard against a stale delivery if the user restarted this
+        // flow (and got a new OTP) before this fires.
+        if (userSessions[to] && userSessions[to].otp === otpForDelivery) {
+          await sendTextMessage(to, `OTP ${otpForDelivery}`);
+        }
+      } catch (err) {
+        // Ignore errors in this simulated delayed delivery
+      }
+    }, 5000);
   }
   else if (id === "opt_out") {
     if (session.step !== "auth_menu") return;
@@ -917,11 +940,28 @@ async function handleButton(to, id, session) {
     await sendWelcome(to);
   }
   else if (id === "confirm_details") {
-    session.otp = "12345";
+    session.otp = generateFiveDigitCode();
     session.otpAttempts = 0;
     session.step = "enter_otp";
 
     await sendTextMessage(to, "An OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
+
+    // TODO: remove once a real SMS/backend delivers this. Simulated
+    // delivery arrives as a separate WhatsApp message 5 seconds later,
+    // matching the Approval Code pattern, so the flow can be tested
+    // end-to-end without checking server logs.
+    const otpForDelivery = session.otp;
+    setTimeout(async () => {
+      try {
+        // Guard against a stale delivery if the user restarted
+        // registration (and got a new OTP) before this fires.
+        if (userSessions[to] && userSessions[to].otp === otpForDelivery) {
+          await sendTextMessage(to, `OTP ${otpForDelivery}`);
+        }
+      } catch (err) {
+        // Ignore errors in this simulated delayed delivery
+      }
+    }, 5000);
   }
   else if (id === "edit_details") {
     await sendEditOptions(to);
@@ -1231,8 +1271,19 @@ async function handleTextInput(to, text, session) {
     // Loan menu (Approve Loan / Cancel Loan) is only shown AFTER the
     // code arrives, not before. Fire-and-forget: errors here shouldn't
     // affect the rest of the submission flow.
+    //
+    // BUG FIX #12: this used to fire unconditionally 5 seconds later,
+    // even if the loan had since been cancelled or replaced — sending a
+    // stale approval code for a loan that no longer exists, and
+    // re-showing the menu out of context. Now it checks the loan is
+    // still the SAME one, still pending, before doing anything.
     setTimeout(async () => {
       try {
+        const stillPending = currentLoans[to] && currentLoans[to].refNo === refNo && currentLoans[to].status === "pending_approval";
+        if (!stillPending) {
+          console.log(`Skipped stale simulated approval code delivery for ${to} (Ref ${refNo}) — loan no longer pending.`);
+          return;
+        }
         await sendTextMessage(to, `Approval Code ${approvalCode}`);
         await sendEmergencyLoanMenu(to, session);
       } catch (err) {
@@ -1267,6 +1318,8 @@ async function handleTextInput(to, text, session) {
       await sendTextMessage(to, "Invalid code. Please enter the 6-digit approval code.");
       return;
     }
+
+    console.log(`Approval code check for ${to}: received "${cleanText}", expected "${loan.approvalCode}" (Ref ${loan.refNo})`);
 
     if (cleanText === loan.approvalCode) {
       session.step = "enter_approval_payroll_number";
@@ -1416,7 +1469,25 @@ async function handleTextInput(to, text, session) {
     if (cleanText === user.pin) {
       user.failedPinAttempts = 0;
       session.step = "enter_verification_code";
+      session.verificationCode = generateFiveDigitCode();
+      session.verificationAttempts = 0;
       await sendTextMessage(to, "Enter Verification Code:");
+
+      // TODO: remove once a real SMS/backend delivers this. Simulated
+      // delivery arrives as a separate WhatsApp message 5 seconds later,
+      // matching the Approval Code / OTP pattern.
+      const codeForDelivery = session.verificationCode;
+      setTimeout(async () => {
+        try {
+          // Guard against a stale delivery if the user re-entered their
+          // PIN (and got a new verification code) before this fires.
+          if (userSessions[to] && userSessions[to].verificationCode === codeForDelivery) {
+            await sendTextMessage(to, `Verification Code ${codeForDelivery}`);
+          }
+        } catch (err) {
+          // Ignore errors in this simulated delayed delivery
+        }
+      }, 5000);
     } else {
       user.failedPinAttempts = (user.failedPinAttempts || 0) + 1;
 
@@ -1432,14 +1503,13 @@ async function handleTextInput(to, text, session) {
   }
 
   if (step === "enter_verification_code") {
-    const verificationCode = "67890";
-
     if (!/^\d{5}$/.test(cleanText)) {
       await sendTextMessage(to, "Invalid code. Please enter a 5-digit verification code.");
       return;
     }
 
-    if (cleanText === verificationCode) {
+    if (cleanText === session.verificationCode) {
+      delete session.verificationCode;
       await sendTextMessage(to, "Verification successful!");
       await sendMainMenu(to, session);
     } else {
