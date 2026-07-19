@@ -1,0 +1,10 @@
+com/mfstechnologies/mymobi/service/WhatsAppMessageService.class
+com/mfstechnologies/mymobi/model/UserSession.class
+com/mfstechnologies/mymobi/session/SessionStore.class
+com/mfstechnologies/mymobi/service/MessageDispatchQueue$RecipientState.class
+com/mfstechnologies/mymobi/service/MessageDispatchQueue.class
+com/mfstechnologies/mymobi/MyMobiApplication.class
+com/mfstechnologies/mymobi/screen/ScreenMessageService.class
+com/mfstechnologies/mymobi/service/WebhookSignatureService.class
+com/mfstechnologies/mymobi/config/WhatsAppProperties.class
+com/mfstechnologies/mymobi/controller/WebhookController.class
