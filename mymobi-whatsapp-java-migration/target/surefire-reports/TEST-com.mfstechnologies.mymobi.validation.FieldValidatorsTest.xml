@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="com.mfstechnologies.mymobi.service.MessageDispatchQueueTest" time="3.041" tests="3" errors="0" skipped="0" failures="0">
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="com.mfstechnologies.mymobi.validation.FieldValidatorsTest" time="0.012" tests="8" errors="0" skipped="0" failures="0">
   <properties>
     <property name="java.specification.version" value="21"/>
     <property name="sun.jnu.encoding" value="UTF-8"/>
@@ -59,7 +59,12 @@
     <property name="socksNonProxyHosts" value="local|*.local|169.254/16|*.169.254/16"/>
     <property name="java.class.version" value="65.0"/>
   </properties>
-  <testcase name="firstMessageOfANewTurnSendsImmediatelyEvenSoonAfterAPreviousTurn" classname="com.mfstechnologies.mymobi.service.MessageDispatchQueueTest" time="0.016"/>
-  <testcase name="differentRecipientsAreNotBlockedByEachOthersQueue" classname="com.mfstechnologies.mymobi.service.MessageDispatchQueueTest" time="0.001"/>
-  <testcase name="messagesToTheSameRecipientSendInOrderWithSpacingBetweenChainedSends" classname="com.mfstechnologies.mymobi.service.MessageDispatchQueueTest" time="3.021"/>
+  <testcase name="fiveDigitCodeValidation" classname="com.mfstechnologies.mymobi.validation.FieldValidatorsTest" time="0.002"/>
+  <testcase name="mobileNumberRejectsWrongFormats" classname="com.mfstechnologies.mymobi.validation.FieldValidatorsTest" time="0.003"/>
+  <testcase name="upnsWithWrongStartingDigitAreRejected" classname="com.mfstechnologies.mymobi.validation.FieldValidatorsTest" time="0.001"/>
+  <testcase name="nonNumericUpnIsRejected" classname="com.mfstechnologies.mymobi.validation.FieldValidatorsTest" time="0.0"/>
+  <testcase name="nationalIdMustBeExactly8DigitsAndNotStartWithZero" classname="com.mfstechnologies.mymobi.validation.FieldValidatorsTest" time="0.001"/>
+  <testcase name="mobileNumberAcceptsBothConfirmedFormats" classname="com.mfstechnologies.mymobi.validation.FieldValidatorsTest" time="0.001"/>
+  <testcase name="upnsLongerThan11DigitsAreRejected" classname="com.mfstechnologies.mymobi.validation.FieldValidatorsTest" time="0.0"/>
+  <testcase name="validUpnsStartingWith1Or2AreAccepted" classname="com.mfstechnologies.mymobi.validation.FieldValidatorsTest" time="0.0"/>
 </testsuite>

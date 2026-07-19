@@ -1,7 +1,12 @@
 com/mfstechnologies/mymobi/model/IncomingMessageTest.class
 com/mfstechnologies/mymobi/service/ConversationServiceTest.class
 com/mfstechnologies/mymobi/service/MessageDeduplicationServiceTest.class
+com/mfstechnologies/mymobi/service/AuthenticationFlowServiceTest.class
 com/mfstechnologies/mymobi/session/SessionStoreTest.class
 com/mfstechnologies/mymobi/service/MessageDispatchQueueTest$TimedSend.class
+com/mfstechnologies/mymobi/service/LoginVerificationServiceTest.class
+com/mfstechnologies/mymobi/validation/CodeGeneratorTest.class
 com/mfstechnologies/mymobi/service/WebhookSignatureServiceTest.class
 com/mfstechnologies/mymobi/service/MessageDispatchQueueTest.class
+com/mfstechnologies/mymobi/service/LoginLockoutServiceTest.class
+com/mfstechnologies/mymobi/validation/FieldValidatorsTest.class

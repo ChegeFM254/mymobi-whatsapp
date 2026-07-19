@@ -9,6 +9,15 @@ whatsapp:
   graph-api-version: ${WHATSAPP_GRAPH_API_VERSION:v21.0}
   public-base-url: ${PUBLIC_BASE_URL:}
 
+app:
+  # Controls whether Log In accepts UPN+PIN for a WhatsApp number with no
+  # stored local record. Defaults to true (bypass ON) so testing isn't
+  # blocked by in-memory storage losing data on restart. Set to false for
+  # UAT/Production once a real backend exists, to require genuine stored
+  # data for login again — no code change needed, matching the Node
+  # version's identical ALLOW_LOGIN_WITHOUT_STORED_DATA flag.
+  allow-login-without-stored-data: ${ALLOW_LOGIN_WITHOUT_STORED_DATA:true}
+
 logging:
   level:
     root: INFO
