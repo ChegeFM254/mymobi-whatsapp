@@ -329,6 +329,61 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
+    public Mono<Void> sendApproveLoanDetails(String to, com.mfstechnologies.mymobi.model.Loan loan) {
+        String details = String.format(
+                "Loan Amount: KES %,d\nTenure: %d month(s)\nDue Date: %s\nStatus: %s\n\nEnter your Approval Code to proceed.",
+                loan.getLoanAmount(),
+                loan.getTenureMonths(),
+                loan.getDueDate(),
+                loan.getStatus()
+        );
+
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "list",
+                        "header", Map.of("type", "text", "text", "Approve Loan"),
+                        "body", Map.of("text", details),
+                        "footer", Map.of("text", "MyMobi Emergency Loan"),
+                        "action", Map.of(
+                                "button", "Select Option",
+                                "sections", List.of(Map.of(
+                                        "title", "Options",
+                                        "rows", List.of(
+                                                Map.of("id", "enter_approval_code_menu", "title", "Enter Approval Code", "description", "Type the code you received"),
+                                                Map.of("id", "cancel_loan", "title", "Cancel Loan", "description", "Cancel this loan application"),
+                                                Map.of("id", "back", "title", "Back", "description", "Go back"),
+                                                Map.of("id", "home", "title", "Home", "description", "Return to home"),
+                                                Map.of("id", "logout", "title", "Log Out", "description", "Log out of the app")
+                                        )
+                                ))
+                        )
+                )
+        );
+        return messageService.sendMessage(to, payload);
+    }
+
+    public Mono<Void> sendCancelLoanConfirm(String to) {
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "button",
+                        "body", Map.of("text", "Are you sure you want to cancel this loan application?"),
+                        "action", Map.of(
+                                "buttons", List.of(
+                                        Map.of("type", "reply", "reply", Map.of("id", "confirm_cancel_loan_yes", "title", "Yes")),
+                                        Map.of("type", "reply", "reply", Map.of("id", "confirm_cancel_loan_no", "title", "No"))
+                                )
+                        )
+                )
+        );
+        return messageService.sendMessage(to, payload);
+    }
+
     private String nullToEmpty(String value) {
         return value == null ? "" : value;
     }

@@ -15,6 +15,7 @@ public class Loan {
     private String refNo;
     private String approvalCode;
     private int approvalCodeAttempts = 0;
+    private int approvalPayrollAttempts = 0;
     private String dueDate;
     private String status; // pending_approval, approved, paid, cancelled
     private int installmentsPaid = 0;

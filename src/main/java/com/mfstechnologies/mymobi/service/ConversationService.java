@@ -37,6 +37,7 @@ public class ConversationService {
     private final ForgotPinFlowService forgotPinFlowService;
     private final OptOutFlowService optOutFlowService;
     private final LoanApplicationFlowService loanApplicationFlowService;
+    private final LoanApprovalFlowService loanApprovalFlowService;
 
     public ConversationService(
             SessionStore sessionStore,
@@ -46,7 +47,8 @@ public class ConversationService {
             RegistrationFlowService registrationFlowService,
             ForgotPinFlowService forgotPinFlowService,
             OptOutFlowService optOutFlowService,
-            LoanApplicationFlowService loanApplicationFlowService
+            LoanApplicationFlowService loanApplicationFlowService,
+            LoanApprovalFlowService loanApprovalFlowService
     ) {
         this.sessionStore = sessionStore;
         this.screenService = screenService;
@@ -56,6 +58,7 @@ public class ConversationService {
         this.forgotPinFlowService = forgotPinFlowService;
         this.optOutFlowService = optOutFlowService;
         this.loanApplicationFlowService = loanApplicationFlowService;
+        this.loanApprovalFlowService = loanApprovalFlowService;
     }
 
     public Mono<Void> handleIncomingMessage(IncomingMessage message) {
@@ -144,6 +147,12 @@ public class ConversationService {
             case "accept_loan" -> loanApplicationFlowService.handleAcceptLoan(to, session);
             case "decline_loan" -> loanApplicationFlowService.handleDeclineLoan(to, session);
 
+            case "approve_loan_menu" -> loanApprovalFlowService.handleApproveLoanMenu(to, session);
+            case "enter_approval_code_menu" -> loanApprovalFlowService.handleEnterApprovalCodeMenu(to, session);
+            case "cancel_loan" -> loanApprovalFlowService.handleCancelLoan(to, session);
+            case "confirm_cancel_loan_yes" -> loanApprovalFlowService.handleCancelLoanYes(to, session);
+            case "confirm_cancel_loan_no" -> loanApprovalFlowService.handleCancelLoanNo(to, session);
+
             default ->
                     messageService.sendTextMessage(to, "You selected: " + buttonId + " (this flow is not ported yet, coming in a future update).");
         };
@@ -181,6 +190,9 @@ public class ConversationService {
 
             case "enter_loan_amount" -> loanApplicationFlowService.handleEnterLoanAmount(to, text, session);
             case "enter_loan_payroll_number" -> loanApplicationFlowService.handleEnterPayrollNumber(to, text, session);
+
+            case "enter_approval_code" -> loanApprovalFlowService.handleEnterApprovalCode(to, text, session);
+            case "approval_payroll_number" -> loanApprovalFlowService.handleApprovalPayrollNumber(to, text, session);
 
             default ->
                     messageService.sendTextMessage(to, "Got it. This part of the conversation is not wired up yet. Try again in a future update!");

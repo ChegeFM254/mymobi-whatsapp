@@ -39,6 +39,8 @@ class ConversationServiceTest {
     private OptOutFlowService optOutFlowService;
     @Mock
     private LoanApplicationFlowService loanApplicationFlowService;
+    @Mock
+    private LoanApprovalFlowService loanApprovalFlowService;
 
     private ConversationService conversationService;
 
@@ -48,7 +50,7 @@ class ConversationServiceTest {
                 sessionStore, screenService, messageService,
                 authFlowService, registrationFlowService,
                 forgotPinFlowService, optOutFlowService,
-                loanApplicationFlowService
+                loanApplicationFlowService, loanApprovalFlowService
         );
     }
 
@@ -81,69 +83,43 @@ class ConversationServiceTest {
     }
 
     @Test
-    void homeButtonAlwaysGoesToWelcome() {
+    void approveLoanMenuButtonRoutesToLoanApprovalFlowService() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
+        when(loanApprovalFlowService.handleApproveLoanMenu(FROM, session)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.3", FROM, null, "home");
+        IncomingMessage message = new IncomingMessage("wamid.3", FROM, null, "approve_loan_menu");
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(screenService).sendWelcome(FROM);
+        verify(loanApprovalFlowService).handleApproveLoanMenu(FROM, session);
     }
 
     @Test
-    void backButtonRoutesToLoanApplicationFlowServiceForCentralizedHandling() {
+    void cancelLoanButtonRoutesToLoanApprovalFlowService() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(loanApplicationFlowService.handleBack(FROM, session)).thenReturn(Mono.empty());
+        when(loanApprovalFlowService.handleCancelLoan(FROM, session)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.4", FROM, null, "back");
+        IncomingMessage message = new IncomingMessage("wamid.4", FROM, null, "cancel_loan");
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(loanApplicationFlowService).handleBack(FROM, session);
+        verify(loanApprovalFlowService).handleCancelLoan(FROM, session);
     }
 
     @Test
-    void emergencyLoanButtonRoutesToLoanApplicationFlowService() {
+    void approvalCodeTextStepRoutesToLoanApprovalFlowService() {
         UserSession session = new UserSession();
+        session.setStep("enter_approval_code");
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(loanApplicationFlowService.handleEmergencyLoan(FROM, session)).thenReturn(Mono.empty());
+        when(loanApprovalFlowService.handleEnterApprovalCode(FROM, "123456", session)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.5", FROM, null, "emergency_loan");
+        IncomingMessage message = new IncomingMessage("wamid.5", FROM, "123456", null);
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(loanApplicationFlowService).handleEmergencyLoan(FROM, session);
-    }
-
-    @Test
-    void anyTenureButtonRoutesToLoanApplicationFlowServiceTenureSelect() {
-        UserSession session = new UserSession();
-        when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(loanApplicationFlowService.handleTenureSelect(FROM, "tenure_2", session)).thenReturn(Mono.empty());
-
-        IncomingMessage message = new IncomingMessage("wamid.6", FROM, null, "tenure_2");
-
-        conversationService.handleIncomingMessage(message).block();
-
-        verify(loanApplicationFlowService).handleTenureSelect(FROM, "tenure_2", session);
-    }
-
-    @Test
-    void loanAmountTextStepRoutesToLoanApplicationFlowService() {
-        UserSession session = new UserSession();
-        session.setStep("enter_loan_amount");
-        when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(loanApplicationFlowService.handleEnterLoanAmount(FROM, "35000", session)).thenReturn(Mono.empty());
-
-        IncomingMessage message = new IncomingMessage("wamid.7", FROM, "35000", null);
-
-        conversationService.handleIncomingMessage(message).block();
-
-        verify(loanApplicationFlowService).handleEnterLoanAmount(FROM, "35000", session);
+        verify(loanApprovalFlowService).handleEnterApprovalCode(FROM, "123456", session);
     }
 
     @Test
@@ -152,12 +128,12 @@ class ConversationServiceTest {
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.8", FROM, null, "some_unported_button");
+        IncomingMessage message = new IncomingMessage("wamid.6", FROM, null, "some_unported_button");
 
         conversationService.handleIncomingMessage(message).block();
 
         verify(messageService).sendTextMessage(eq(FROM), anyString());
-        verifyNoInteractions(authFlowService, registrationFlowService, forgotPinFlowService, optOutFlowService, loanApplicationFlowService);
+        verifyNoInteractions(authFlowService, registrationFlowService, forgotPinFlowService, optOutFlowService, loanApplicationFlowService, loanApprovalFlowService);
     }
 
     @Test
@@ -166,7 +142,7 @@ class ConversationServiceTest {
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
         when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.9", FROM, "hi", null);
+        IncomingMessage message = new IncomingMessage("wamid.7", FROM, "hi", null);
 
         conversationService.handleIncomingMessage(message).block();
 
