@@ -27,6 +27,8 @@ public class ConversationService {
             "edit_firstname", "edit_lastname", "edit_upn", "edit_nationalid", "edit_mobilenumber"
     );
 
+    private static final Set<String> TENURE_IDS = Set.of("tenure_1", "tenure_2", "tenure_3");
+
     private final SessionStore sessionStore;
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
@@ -34,6 +36,7 @@ public class ConversationService {
     private final RegistrationFlowService registrationFlowService;
     private final ForgotPinFlowService forgotPinFlowService;
     private final OptOutFlowService optOutFlowService;
+    private final LoanApplicationFlowService loanApplicationFlowService;
 
     public ConversationService(
             SessionStore sessionStore,
@@ -42,7 +45,8 @@ public class ConversationService {
             AuthenticationFlowService authFlowService,
             RegistrationFlowService registrationFlowService,
             ForgotPinFlowService forgotPinFlowService,
-            OptOutFlowService optOutFlowService
+            OptOutFlowService optOutFlowService,
+            LoanApplicationFlowService loanApplicationFlowService
     ) {
         this.sessionStore = sessionStore;
         this.screenService = screenService;
@@ -51,6 +55,7 @@ public class ConversationService {
         this.registrationFlowService = registrationFlowService;
         this.forgotPinFlowService = forgotPinFlowService;
         this.optOutFlowService = optOutFlowService;
+        this.loanApplicationFlowService = loanApplicationFlowService;
     }
 
     public Mono<Void> handleIncomingMessage(IncomingMessage message) {
@@ -110,11 +115,16 @@ public class ConversationService {
         if (EDIT_FIELD_IDS.contains(buttonId)) {
             return registrationFlowService.handleEditFieldSelect(to, buttonId, session);
         }
+        if (TENURE_IDS.contains(buttonId)) {
+            return loanApplicationFlowService.handleTenureSelect(to, buttonId, session);
+        }
 
         return switch (buttonId) {
             case "civil_servants" -> authFlowService.handleCivilServants(to, session);
             case "login_menu" -> authFlowService.handleLoginMenu(to, session);
             case "logout" -> authFlowService.handleLogout(to, session);
+            case "home" -> screenService.sendWelcome(to);
+            case "back" -> loanApplicationFlowService.handleBack(to, session);
 
             case "register_menu" -> registrationFlowService.handleRegisterMenu(to, session);
             case "optin_yes" -> registrationFlowService.handleOptInYes(to, session);
@@ -127,6 +137,12 @@ public class ConversationService {
 
             case "forgot_pin" -> forgotPinFlowService.handleForgotPin(to, session);
             case "opt_out" -> optOutFlowService.handleOptOut(to, session);
+
+            case "emergency_loan" -> loanApplicationFlowService.handleEmergencyLoan(to, session);
+            case "apply_loan" -> loanApplicationFlowService.handleApplyLoan(to, session);
+            case "start_loan_amount_entry" -> loanApplicationFlowService.handleStartLoanAmountEntry(to, session);
+            case "accept_loan" -> loanApplicationFlowService.handleAcceptLoan(to, session);
+            case "decline_loan" -> loanApplicationFlowService.handleDeclineLoan(to, session);
 
             default ->
                     messageService.sendTextMessage(to, "You selected: " + buttonId + " (this flow is not ported yet, coming in a future update).");
@@ -162,6 +178,9 @@ public class ConversationService {
 
             case "opt_out_confirmation" -> optOutFlowService.handleOptOutConfirmation(to, text, session);
             case "opt_out_pin" -> optOutFlowService.handleOptOutPin(to, text, session);
+
+            case "enter_loan_amount" -> loanApplicationFlowService.handleEnterLoanAmount(to, text, session);
+            case "enter_loan_payroll_number" -> loanApplicationFlowService.handleEnterPayrollNumber(to, text, session);
 
             default ->
                     messageService.sendTextMessage(to, "Got it. This part of the conversation is not wired up yet. Try again in a future update!");

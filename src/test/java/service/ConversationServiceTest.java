@@ -37,6 +37,8 @@ class ConversationServiceTest {
     private ForgotPinFlowService forgotPinFlowService;
     @Mock
     private OptOutFlowService optOutFlowService;
+    @Mock
+    private LoanApplicationFlowService loanApplicationFlowService;
 
     private ConversationService conversationService;
 
@@ -45,7 +47,8 @@ class ConversationServiceTest {
         conversationService = new ConversationService(
                 sessionStore, screenService, messageService,
                 authFlowService, registrationFlowService,
-                forgotPinFlowService, optOutFlowService
+                forgotPinFlowService, optOutFlowService,
+                loanApplicationFlowService
         );
     }
 
@@ -78,57 +81,69 @@ class ConversationServiceTest {
     }
 
     @Test
-    void forgotPinButtonRoutesToForgotPinFlowService() {
+    void homeButtonAlwaysGoesToWelcome() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(forgotPinFlowService.handleForgotPin(FROM, session)).thenReturn(Mono.empty());
+        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.3", FROM, null, "forgot_pin");
+        IncomingMessage message = new IncomingMessage("wamid.3", FROM, null, "home");
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(forgotPinFlowService).handleForgotPin(FROM, session);
+        verify(screenService).sendWelcome(FROM);
     }
 
     @Test
-    void optOutButtonRoutesToOptOutFlowService() {
+    void backButtonRoutesToLoanApplicationFlowServiceForCentralizedHandling() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(optOutFlowService.handleOptOut(FROM, session)).thenReturn(Mono.empty());
+        when(loanApplicationFlowService.handleBack(FROM, session)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.4", FROM, null, "opt_out");
+        IncomingMessage message = new IncomingMessage("wamid.4", FROM, null, "back");
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(optOutFlowService).handleOptOut(FROM, session);
+        verify(loanApplicationFlowService).handleBack(FROM, session);
     }
 
     @Test
-    void forgotPinOtpStepRoutesToForgotPinFlowService() {
+    void emergencyLoanButtonRoutesToLoanApplicationFlowService() {
         UserSession session = new UserSession();
-        session.setStep("forgot_pin_enter_otp");
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(forgotPinFlowService.handleEnterOtp(FROM, "12345", session)).thenReturn(Mono.empty());
+        when(loanApplicationFlowService.handleEmergencyLoan(FROM, session)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.5", FROM, "12345", null);
+        IncomingMessage message = new IncomingMessage("wamid.5", FROM, null, "emergency_loan");
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(forgotPinFlowService).handleEnterOtp(FROM, "12345", session);
+        verify(loanApplicationFlowService).handleEmergencyLoan(FROM, session);
     }
 
     @Test
-    void optOutConfirmationStepRoutesToOptOutFlowService() {
+    void anyTenureButtonRoutesToLoanApplicationFlowServiceTenureSelect() {
         UserSession session = new UserSession();
-        session.setStep("opt_out_confirmation");
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(optOutFlowService.handleOptOutConfirmation(FROM, "yes", session)).thenReturn(Mono.empty());
+        when(loanApplicationFlowService.handleTenureSelect(FROM, "tenure_2", session)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.6", FROM, "yes", null);
+        IncomingMessage message = new IncomingMessage("wamid.6", FROM, null, "tenure_2");
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(optOutFlowService).handleOptOutConfirmation(FROM, "yes", session);
+        verify(loanApplicationFlowService).handleTenureSelect(FROM, "tenure_2", session);
+    }
+
+    @Test
+    void loanAmountTextStepRoutesToLoanApplicationFlowService() {
+        UserSession session = new UserSession();
+        session.setStep("enter_loan_amount");
+        when(sessionStore.getOrCreate(FROM)).thenReturn(session);
+        when(loanApplicationFlowService.handleEnterLoanAmount(FROM, "35000", session)).thenReturn(Mono.empty());
+
+        IncomingMessage message = new IncomingMessage("wamid.7", FROM, "35000", null);
+
+        conversationService.handleIncomingMessage(message).block();
+
+        verify(loanApplicationFlowService).handleEnterLoanAmount(FROM, "35000", session);
     }
 
     @Test
@@ -137,12 +152,12 @@ class ConversationServiceTest {
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.7", FROM, null, "some_unported_button");
+        IncomingMessage message = new IncomingMessage("wamid.8", FROM, null, "some_unported_button");
 
         conversationService.handleIncomingMessage(message).block();
 
         verify(messageService).sendTextMessage(eq(FROM), anyString());
-        verifyNoInteractions(authFlowService, registrationFlowService, forgotPinFlowService, optOutFlowService);
+        verifyNoInteractions(authFlowService, registrationFlowService, forgotPinFlowService, optOutFlowService, loanApplicationFlowService);
     }
 
     @Test
@@ -151,7 +166,7 @@ class ConversationServiceTest {
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
         when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.8", FROM, "hi", null);
+        IncomingMessage message = new IncomingMessage("wamid.9", FROM, "hi", null);
 
         conversationService.handleIncomingMessage(message).block();
 

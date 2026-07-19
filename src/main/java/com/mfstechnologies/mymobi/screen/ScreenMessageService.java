@@ -7,18 +7,6 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Builds and sends the various interactive screens shown to users —
- * direct equivalent of the many sendXxx() functions in the Node.js
- * version (sendWelcome, sendMainMenu, sendOptIn, etc). This class will
- * grow to hold each of those as the corresponding flow gets ported.
- *
- * STANDING CONVENTION carried over from the Node version: WhatsApp's
- * interactive "button" message type supports a MAXIMUM of 3 buttons.
- * Anything needing 4+ options (or any Back/Home/Logout combination) must
- * use the interactive "list" type instead. Keep this in mind for every
- * screen added here.
- */
 @Service
 public class ScreenMessageService {
 
@@ -28,10 +16,6 @@ public class ScreenMessageService {
         this.messageService = messageService;
     }
 
-    /**
-     * The Welcome/Home screen — direct equivalent of sendWelcome() in the
-     * Node.js version, including the Log Out option added there later.
-     */
     public Mono<Void> sendWelcome(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
@@ -58,12 +42,6 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
-    /**
-     * The pre-login "Civil Servants" screen — Log In / Register / Forgot
-     * PIN / Opt Out. Direct equivalent of sendCivilServantsMenu() in the
-     * Node.js version (the multi-channel-aware menu that replaced the
-     * old "Enter PIN" auth screen).
-     */
     public Mono<Void> sendCivilServantsMenu(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
@@ -91,18 +69,6 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
-    /**
-     * The post-login Main Menu. Direct equivalent of sendMainMenu() in
-     * the Node.js version.
-     *
-     * NOTE ON SCOPE: the row ids here (emergency_loan, payslip_menu,
-     * etc.) match the real Node version's structure, but their actual
-     * flows aren't ported yet — tapping them currently falls through to
-     * ConversationService's generic handleButton() stub. This screen
-     * exists now so the structure is correct and ready for each flow to
-     * be plugged in incrementally, same approach as everywhere else in
-     * this rewrite.
-     */
     public Mono<Void> sendMainMenu(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
@@ -133,11 +99,6 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
-    /**
-     * Registration: opt-in confirmation. Direct equivalent of sendOptIn()
-     * in the Node.js version. Only 2 options — fits within the 3-button
-     * cap, so "button" type is fine here (see standing convention above).
-     */
     public Mono<Void> sendOptIn(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
@@ -157,10 +118,6 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
-    /**
-     * Registration: terms & conditions acceptance. Direct equivalent of
-     * sendTerms() in the Node.js version.
-     */
     public Mono<Void> sendTerms(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
@@ -171,7 +128,7 @@ public class ScreenMessageService {
                         "body", Map.of("text", "Please accept T&Cs and Data Privacy Policy of MyMobi Civil Servants Emergency Loan.\nView at: www.mymobi.co.ke"),
                         "action", Map.of(
                                 "buttons", List.of(
-                                        Map.of("type", "reply", "reply", Map.of("id", "accept_tc", "title", "✅ Accept")),
+                                        Map.of("type", "reply", "reply", Map.of("id", "accept_tc", "title", "Accept")),
                                         Map.of("type", "reply", "reply", Map.of("id", "decline_tc", "title", "Decline"))
                                 )
                         )
@@ -180,11 +137,6 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
-    /**
-     * Registration: shows the collected KYC details for confirmation
-     * before proceeding to OTP. Direct equivalent of sendConfirmation()
-     * in the Node.js version.
-     */
     public Mono<Void> sendConfirmation(String to, com.mfstechnologies.mymobi.model.UserSession session) {
         String details = String.format("""
                 Confirm Details:
@@ -212,8 +164,8 @@ public class ScreenMessageService {
                         "body", Map.of("text", details),
                         "action", Map.of(
                                 "buttons", List.of(
-                                        Map.of("type", "reply", "reply", Map.of("id", "confirm_details", "title", "✅ Accept")),
-                                        Map.of("type", "reply", "reply", Map.of("id", "edit_details", "title", "✏️ Edit"))
+                                        Map.of("type", "reply", "reply", Map.of("id", "confirm_details", "title", "Accept")),
+                                        Map.of("type", "reply", "reply", Map.of("id", "edit_details", "title", "Edit"))
                                 )
                         )
                 )
@@ -221,11 +173,6 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
-    /**
-     * Registration: pick which KYC field to edit. Direct equivalent of
-     * sendEditOptions() in the Node.js version. 6 options, so this needs
-     * "list" type per the standing convention.
-     */
     public Mono<Void> sendEditOptions(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
@@ -247,6 +194,133 @@ public class ScreenMessageService {
                                                 Map.of("id", "edit_nationalid", "title", "National ID", "description", "Update your National ID"),
                                                 Map.of("id", "edit_mobilenumber", "title", "Mobile Number (Mpesa)", "description", "Update your M-Pesa number"),
                                                 Map.of("id", "exit_edit", "title", "Exit", "description", "Return to Confirm Details")
+                                        )
+                                ))
+                        )
+                )
+        );
+        return messageService.sendMessage(to, payload);
+    }
+
+    public Mono<Void> sendEmergencyLoanMenu(String to, String loanStatus) {
+        java.util.List<Map<String, Object>> rows = new java.util.ArrayList<>();
+
+        if ("pending_approval".equals(loanStatus)) {
+            rows.add(Map.of("id", "approve_loan_menu", "title", "Approve Loan", "description", "Approve your pending loan"));
+            rows.add(Map.of("id", "cancel_loan", "title", "Cancel Loan", "description", "Cancel this loan application"));
+        } else if ("approved".equals(loanStatus)) {
+            rows.add(Map.of("id", "pay_loan_menu", "title", "Pay Loan", "description", "Make an early repayment"));
+        } else {
+            rows.add(Map.of("id", "apply_loan", "title", "Apply Loan", "description", "Apply for an emergency loan"));
+        }
+
+        rows.add(Map.of("id", "back", "title", "Back", "description", "Go back"));
+        rows.add(Map.of("id", "home", "title", "Home", "description", "Return to home"));
+        rows.add(Map.of("id", "logout", "title", "Log Out", "description", "Log out of the app"));
+
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "list",
+                        "header", Map.of("type", "text", "text", "Emergency Loan"),
+                        "body", Map.of("text", "What would you like to do?"),
+                        "footer", Map.of("text", "MyMobi"),
+                        "action", Map.of(
+                                "button", "Select Option",
+                                "sections", List.of(Map.of("title", "Options", "rows", rows))
+                        )
+                )
+        );
+        return messageService.sendMessage(to, payload);
+    }
+
+    public Mono<Void> sendLoanTenureOptions(String to) {
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "list",
+                        "header", Map.of("type", "text", "text", "Apply Loan"),
+                        "body", Map.of("text", "Select your repayment period:"),
+                        "footer", Map.of("text", "MyMobi Emergency Loan"),
+                        "action", Map.of(
+                                "button", "Select Period",
+                                "sections", List.of(Map.of(
+                                        "title", "Repayment Period",
+                                        "rows", List.of(
+                                                Map.of("id", "tenure_1", "title", "1 Month", "description", "Loan limit KES 20,000"),
+                                                Map.of("id", "tenure_2", "title", "2 Months", "description", "Loan limit KES 40,000"),
+                                                Map.of("id", "tenure_3", "title", "3 Months", "description", "Loan limit KES 60,000"),
+                                                Map.of("id", "back", "title", "Back", "description", "Go back"),
+                                                Map.of("id", "home", "title", "Home", "description", "Return to home"),
+                                                Map.of("id", "logout", "title", "Log Out", "description", "Log out of the app")
+                                        )
+                                ))
+                        )
+                )
+        );
+        return messageService.sendMessage(to, payload);
+    }
+
+    public Mono<Void> sendLoanAmountMenu(String to, int loanLimit, int tenureMonths) {
+        String monthLabel = tenureMonths > 1 ? "months" : "month";
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "list",
+                        "header", Map.of("type", "text", "text", "Apply Loan"),
+                        "body", Map.of("text", "Loan limit: KES " + loanLimit + " over " + tenureMonths + " " + monthLabel + "."),
+                        "footer", Map.of("text", "MyMobi Emergency Loan"),
+                        "action", Map.of(
+                                "button", "Select Option",
+                                "sections", List.of(Map.of(
+                                        "title", "Options",
+                                        "rows", List.of(
+                                                Map.of("id", "start_loan_amount_entry", "title", "Enter Loan Amount", "description", "Type the amount you wish to borrow"),
+                                                Map.of("id", "back", "title", "Back", "description", "Select a different repayment period"),
+                                                Map.of("id", "home", "title", "Home", "description", "Return to home")
+                                        )
+                                ))
+                        )
+                )
+        );
+        return messageService.sendMessage(to, payload);
+    }
+
+    public Mono<Void> sendLoanBreakdown(String to, com.mfstechnologies.mymobi.model.LoanBreakdown breakdown) {
+        String details = String.format(
+                "Loan %,d\nUpfront Fees %,d\nDisbursement %,d\nMonthly Installment %,d\nPlatform Fee %,d",
+                breakdown.loanAmount(),
+                breakdown.upfrontFee(),
+                breakdown.disbursement(),
+                breakdown.monthlyInstallment(),
+                breakdown.platformFee()
+        );
+
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "list",
+                        "header", Map.of("type", "text", "text", "Loan Breakdown"),
+                        "body", Map.of("text", details),
+                        "footer", Map.of("text", "MyMobi Emergency Loan"),
+                        "action", Map.of(
+                                "button", "Select Option",
+                                "sections", List.of(Map.of(
+                                        "title", "Options",
+                                        "rows", List.of(
+                                                Map.of("id", "accept_loan", "title", "Accept", "description", "Confirm and proceed"),
+                                                Map.of("id", "decline_loan", "title", "Decline", "description", "Cancel this loan application"),
+                                                Map.of("id", "back", "title", "Back", "description", "Return to Enter Loan Amount menu"),
+                                                Map.of("id", "home", "title", "Home", "description", "Return to home"),
+                                                Map.of("id", "logout", "title", "Log Out", "description", "Log out of the app")
                                         )
                                 ))
                         )
