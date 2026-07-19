@@ -1,4 +1,7 @@
-com/mfstechnologies/mymobi/service/WebhookSignatureServiceTest.class
+com/mfstechnologies/mymobi/model/IncomingMessageTest.class
+com/mfstechnologies/mymobi/service/ConversationServiceTest.class
+com/mfstechnologies/mymobi/service/MessageDeduplicationServiceTest.class
 com/mfstechnologies/mymobi/session/SessionStoreTest.class
-com/mfstechnologies/mymobi/service/MessageDispatchQueueTest.class
 com/mfstechnologies/mymobi/service/MessageDispatchQueueTest$TimedSend.class
+com/mfstechnologies/mymobi/service/WebhookSignatureServiceTest.class
+com/mfstechnologies/mymobi/service/MessageDispatchQueueTest.class

@@ -1,8 +1,11 @@
 /Users/fchege/Downloads/mymobi-whatsapp-java-migration/src/main/java/com/mfstechnologies/mymobi/MyMobiApplication.java
 /Users/fchege/Downloads/mymobi-whatsapp-java-migration/src/main/java/com/mfstechnologies/mymobi/config/WhatsAppProperties.java
 /Users/fchege/Downloads/mymobi-whatsapp-java-migration/src/main/java/com/mfstechnologies/mymobi/controller/WebhookController.java
+/Users/fchege/Downloads/mymobi-whatsapp-java-migration/src/main/java/com/mfstechnologies/mymobi/model/IncomingMessage.java
 /Users/fchege/Downloads/mymobi-whatsapp-java-migration/src/main/java/com/mfstechnologies/mymobi/model/UserSession.java
 /Users/fchege/Downloads/mymobi-whatsapp-java-migration/src/main/java/com/mfstechnologies/mymobi/screen/ScreenMessageService.java
+/Users/fchege/Downloads/mymobi-whatsapp-java-migration/src/main/java/com/mfstechnologies/mymobi/service/ConversationService.java
+/Users/fchege/Downloads/mymobi-whatsapp-java-migration/src/main/java/com/mfstechnologies/mymobi/service/MessageDeduplicationService.java
 /Users/fchege/Downloads/mymobi-whatsapp-java-migration/src/main/java/com/mfstechnologies/mymobi/service/MessageDispatchQueue.java
 /Users/fchege/Downloads/mymobi-whatsapp-java-migration/src/main/java/com/mfstechnologies/mymobi/service/WebhookSignatureService.java
 /Users/fchege/Downloads/mymobi-whatsapp-java-migration/src/main/java/com/mfstechnologies/mymobi/service/WhatsAppMessageService.java

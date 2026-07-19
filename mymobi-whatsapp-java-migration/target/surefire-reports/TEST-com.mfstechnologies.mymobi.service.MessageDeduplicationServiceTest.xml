@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="com.mfstechnologies.mymobi.service.WebhookSignatureServiceTest" time="0.05" tests="5" errors="0" skipped="0" failures="0">
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="com.mfstechnologies.mymobi.service.MessageDeduplicationServiceTest" time="0.006" tests="4" errors="0" skipped="0" failures="0">
   <properties>
     <property name="java.specification.version" value="21"/>
     <property name="sun.jnu.encoding" value="UTF-8"/>
@@ -59,9 +59,8 @@
     <property name="socksNonProxyHosts" value="local|*.local|169.254/16|*.169.254/16"/>
     <property name="java.class.version" value="65.0"/>
   </properties>
-  <testcase name="wrongSecretProducesRejectedSignature" classname="com.mfstechnologies.mymobi.service.WebhookSignatureServiceTest" time="0.045"/>
-  <testcase name="validSignatureIsAccepted" classname="com.mfstechnologies.mymobi.service.WebhookSignatureServiceTest" time="0.001"/>
-  <testcase name="missingSignatureHeaderIsRejectedWhenSecretIsConfigured" classname="com.mfstechnologies.mymobi.service.WebhookSignatureServiceTest" time="0.0"/>
-  <testcase name="verificationIsSkippedWhenNoAppSecretIsConfiguredYet" classname="com.mfstechnologies.mymobi.service.WebhookSignatureServiceTest" time="0.0"/>
-  <testcase name="tamperedBodyIsRejected" classname="com.mfstechnologies.mymobi.service.WebhookSignatureServiceTest" time="0.001"/>
+  <testcase name="nullMessageIdIsNeverTreatedAsADuplicate" classname="com.mfstechnologies.mymobi.service.MessageDeduplicationServiceTest" time="0.001"/>
+  <testcase name="secondTimeSeeingTheSameMessageIdIsADuplicate" classname="com.mfstechnologies.mymobi.service.MessageDeduplicationServiceTest" time="0.001"/>
+  <testcase name="firstTimeSeeingAMessageIdIsNotADuplicate" classname="com.mfstechnologies.mymobi.service.MessageDeduplicationServiceTest" time="0.0"/>
+  <testcase name="differentMessageIdsAreNeverConsideredDuplicatesOfEachOther" classname="com.mfstechnologies.mymobi.service.MessageDeduplicationServiceTest" time="0.0"/>
 </testsuite>
