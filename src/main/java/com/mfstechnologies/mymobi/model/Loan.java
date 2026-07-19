@@ -19,6 +19,7 @@ public class Loan {
     private String dueDate;
     private String status; // pending_approval, approved, paid, cancelled
     private int installmentsPaid = 0;
+    private boolean paymentInProgress = false;
     private Instant submittedAt;
     private Instant approvedAt;
 }

@@ -384,6 +384,123 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
+    public Mono<Void> sendPayLoanOptions(String to, int remainingInstallments, int monthlyInstallmentAmount) {
+        java.util.List<Map<String, Object>> rows = new java.util.ArrayList<>();
+        for (int n = 1; n <= remainingInstallments; n++) {
+            int total = monthlyInstallmentAmount * n;
+            String label = n == 1 ? "Pay 1 installment" : "Pay " + n + " installments";
+            rows.add(Map.of(
+                    "id", "pay_installments_" + n,
+                    "title", label,
+                    "description", "KES " + String.format("%,d", total)
+            ));
+        }
+        rows.add(Map.of("id", "back", "title", "Back", "description", "Go back"));
+        rows.add(Map.of("id", "home", "title", "Home", "description", "Return to home"));
+
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "list",
+                        "header", Map.of("type", "text", "text", "Pay Loan"),
+                        "body", Map.of("text", "How many installments would you like to pay?"),
+                        "footer", Map.of("text", "MyMobi Emergency Loan"),
+                        "action", Map.of(
+                                "button", "Select Option",
+                                "sections", List.of(Map.of("title", "Options", "rows", rows))
+                        )
+                )
+        );
+        return messageService.sendMessage(to, payload);
+    }
+
+    public Mono<Void> sendPayLoanConfirm(String to, int installments, int totalAmount, int remainingBalanceAfter) {
+        String body = String.format(
+                "You are about to pay %d installment(s) totaling KES %,d.\n\nRemaining balance after this payment: %d installment(s).\n\nProceed?",
+                installments, totalAmount, remainingBalanceAfter
+        );
+
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "button",
+                        "body", Map.of("text", body),
+                        "action", Map.of(
+                                "buttons", List.of(
+                                        Map.of("type", "reply", "reply", Map.of("id", "confirm_pay_loan", "title", "Proceed")),
+                                        Map.of("type", "reply", "reply", Map.of("id", "cancel_pay_loan", "title", "Cancel"))
+                                )
+                        )
+                )
+        );
+        return messageService.sendMessage(to, payload);
+    }
+    public Mono<Void> sendPayslipConfirm(String to, int months, double cost) {
+        String body = String.format("Payslip for %d month(s): KES %.2f\n\nProceed?", months, cost);
+
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "button",
+                        "body", Map.of("text", body),
+                        "action", Map.of(
+                                "buttons", List.of(
+                                        Map.of("type", "reply", "reply", Map.of("id", "confirm_payslip", "title", "Proceed")),
+                                        Map.of("type", "reply", "reply", Map.of("id", "cancel_payslip", "title", "Cancel"))
+                                )
+                        )
+                )
+        );
+        return messageService.sendMessage(to, payload);
+    }
+
+    public Mono<Void> sendLoanStatementConfirm(String to, double cost) {
+        String body = String.format("Loan Statement: KES %.2f\n\nProceed?", cost);
+
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "button",
+                        "body", Map.of("text", body),
+                        "action", Map.of(
+                                "buttons", List.of(
+                                        Map.of("type", "reply", "reply", Map.of("id", "confirm_loan_statement", "title", "Proceed")),
+                                        Map.of("type", "reply", "reply", Map.of("id", "cancel_loan_statement", "title", "Cancel"))
+                                )
+                        )
+                )
+        );
+        return messageService.sendMessage(to, payload);
+    }
+
+    public Mono<Void> sendLoanClearanceConfirm(String to, double cost) {
+        String body = String.format("Loan Clearance Letter: KES %.2f\n\nProceed?", cost);
+
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "button",
+                        "body", Map.of("text", body),
+                        "action", Map.of(
+                                "buttons", List.of(
+                                        Map.of("type", "reply", "reply", Map.of("id", "confirm_loan_clearance", "title", "Proceed")),
+                                        Map.of("type", "reply", "reply", Map.of("id", "cancel_loan_clearance", "title", "Cancel"))
+                                )
+                        )
+                )
+        );
+        return messageService.sendMessage(to, payload);
+    }
     private String nullToEmpty(String value) {
         return value == null ? "" : value;
     }

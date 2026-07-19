@@ -41,6 +41,12 @@ class ConversationServiceTest {
     private LoanApplicationFlowService loanApplicationFlowService;
     @Mock
     private LoanApprovalFlowService loanApprovalFlowService;
+    @Mock
+    private LoanPaymentFlowService loanPaymentFlowService;
+    @Mock
+    private PayslipFlowService payslipFlowService;
+    @Mock
+    private LoanDocumentFlowService loanDocumentFlowService;
 
     private ConversationService conversationService;
 
@@ -50,7 +56,9 @@ class ConversationServiceTest {
                 sessionStore, screenService, messageService,
                 authFlowService, registrationFlowService,
                 forgotPinFlowService, optOutFlowService,
-                loanApplicationFlowService, loanApprovalFlowService
+                loanApplicationFlowService, loanApprovalFlowService,
+                loanPaymentFlowService, payslipFlowService,
+                loanDocumentFlowService
         );
     }
 
@@ -83,43 +91,42 @@ class ConversationServiceTest {
     }
 
     @Test
-    void approveLoanMenuButtonRoutesToLoanApprovalFlowService() {
+    void loanStatementMenuButtonRoutesToLoanDocumentFlowService() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(loanApprovalFlowService.handleApproveLoanMenu(FROM, session)).thenReturn(Mono.empty());
+        when(loanDocumentFlowService.handleLoanStatementMenu(FROM, session)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.3", FROM, null, "approve_loan_menu");
+        IncomingMessage message = new IncomingMessage("wamid.3", FROM, null, "loan_statement_menu");
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(loanApprovalFlowService).handleApproveLoanMenu(FROM, session);
+        verify(loanDocumentFlowService).handleLoanStatementMenu(FROM, session);
     }
 
     @Test
-    void cancelLoanButtonRoutesToLoanApprovalFlowService() {
+    void loanClearanceMenuButtonRoutesToLoanDocumentFlowService() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(loanApprovalFlowService.handleCancelLoan(FROM, session)).thenReturn(Mono.empty());
+        when(loanDocumentFlowService.handleLoanClearanceMenu(FROM, session)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.4", FROM, null, "cancel_loan");
+        IncomingMessage message = new IncomingMessage("wamid.4", FROM, null, "loan_clearance_menu");
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(loanApprovalFlowService).handleCancelLoan(FROM, session);
+        verify(loanDocumentFlowService).handleLoanClearanceMenu(FROM, session);
     }
 
     @Test
-    void approvalCodeTextStepRoutesToLoanApprovalFlowService() {
+    void payslipMenuButtonRoutesToPayslipFlowService() {
         UserSession session = new UserSession();
-        session.setStep("enter_approval_code");
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(loanApprovalFlowService.handleEnterApprovalCode(FROM, "123456", session)).thenReturn(Mono.empty());
+        when(payslipFlowService.handlePayslipMenu(FROM, session)).thenReturn(Mono.empty());
 
-        IncomingMessage message = new IncomingMessage("wamid.5", FROM, "123456", null);
+        IncomingMessage message = new IncomingMessage("wamid.5", FROM, null, "payslip_menu");
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(loanApprovalFlowService).handleEnterApprovalCode(FROM, "123456", session);
+        verify(payslipFlowService).handlePayslipMenu(FROM, session);
     }
 
     @Test
@@ -133,7 +140,9 @@ class ConversationServiceTest {
         conversationService.handleIncomingMessage(message).block();
 
         verify(messageService).sendTextMessage(eq(FROM), anyString());
-        verifyNoInteractions(authFlowService, registrationFlowService, forgotPinFlowService, optOutFlowService, loanApplicationFlowService, loanApprovalFlowService);
+        verifyNoInteractions(authFlowService, registrationFlowService, forgotPinFlowService, optOutFlowService,
+                loanApplicationFlowService, loanApprovalFlowService, loanPaymentFlowService, payslipFlowService,
+                loanDocumentFlowService);
     }
 
     @Test

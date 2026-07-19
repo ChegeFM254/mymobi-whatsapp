@@ -41,4 +41,12 @@ public class UserSession {
     // can return to the right place. Only used by screens that actually
     // show a Back option - see LoanApplicationFlowService.handleBack().
     private String currentMenu;
+
+    // Pay Loan flow - how many installments the person selected to pay,
+    // between tapping the option and confirming.
+    private Integer pendingPaymentInstallments;
+
+    // Document purchase flow (Payslip, Loan Statement, Loan Clearance)
+    private String pendingDocumentType;
+    private Integer pendingDocumentMonths;
 }

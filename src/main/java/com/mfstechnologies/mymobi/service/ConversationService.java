@@ -28,6 +28,7 @@ public class ConversationService {
     );
 
     private static final Set<String> TENURE_IDS = Set.of("tenure_1", "tenure_2", "tenure_3");
+    private static final String PAY_INSTALLMENTS_PREFIX = "pay_installments_";
 
     private final SessionStore sessionStore;
     private final ScreenMessageService screenService;
@@ -38,6 +39,9 @@ public class ConversationService {
     private final OptOutFlowService optOutFlowService;
     private final LoanApplicationFlowService loanApplicationFlowService;
     private final LoanApprovalFlowService loanApprovalFlowService;
+    private final LoanPaymentFlowService loanPaymentFlowService;
+    private final PayslipFlowService payslipFlowService;
+    private final LoanDocumentFlowService loanDocumentFlowService;
 
     public ConversationService(
             SessionStore sessionStore,
@@ -48,7 +52,10 @@ public class ConversationService {
             ForgotPinFlowService forgotPinFlowService,
             OptOutFlowService optOutFlowService,
             LoanApplicationFlowService loanApplicationFlowService,
-            LoanApprovalFlowService loanApprovalFlowService
+            LoanApprovalFlowService loanApprovalFlowService,
+            LoanPaymentFlowService loanPaymentFlowService,
+            PayslipFlowService payslipFlowService,
+            LoanDocumentFlowService loanDocumentFlowService
     ) {
         this.sessionStore = sessionStore;
         this.screenService = screenService;
@@ -59,6 +66,9 @@ public class ConversationService {
         this.optOutFlowService = optOutFlowService;
         this.loanApplicationFlowService = loanApplicationFlowService;
         this.loanApprovalFlowService = loanApprovalFlowService;
+        this.loanPaymentFlowService = loanPaymentFlowService;
+        this.payslipFlowService = payslipFlowService;
+        this.loanDocumentFlowService = loanDocumentFlowService;
     }
 
     public Mono<Void> handleIncomingMessage(IncomingMessage message) {
@@ -121,6 +131,9 @@ public class ConversationService {
         if (TENURE_IDS.contains(buttonId)) {
             return loanApplicationFlowService.handleTenureSelect(to, buttonId, session);
         }
+        if (buttonId != null && buttonId.startsWith(PAY_INSTALLMENTS_PREFIX)) {
+            return loanPaymentFlowService.handlePayInstallmentsSelect(to, buttonId, session);
+        }
 
         return switch (buttonId) {
             case "civil_servants" -> authFlowService.handleCivilServants(to, session);
@@ -128,6 +141,8 @@ public class ConversationService {
             case "logout" -> authFlowService.handleLogout(to, session);
             case "home" -> screenService.sendWelcome(to);
             case "back" -> loanApplicationFlowService.handleBack(to, session);
+
+            case "buy_airtime" -> messageService.sendTextMessage(to, "Buy Airtime is coming soon. Thank you for your patience.");
 
             case "register_menu" -> registrationFlowService.handleRegisterMenu(to, session);
             case "optin_yes" -> registrationFlowService.handleOptInYes(to, session);
@@ -152,6 +167,22 @@ public class ConversationService {
             case "cancel_loan" -> loanApprovalFlowService.handleCancelLoan(to, session);
             case "confirm_cancel_loan_yes" -> loanApprovalFlowService.handleCancelLoanYes(to, session);
             case "confirm_cancel_loan_no" -> loanApprovalFlowService.handleCancelLoanNo(to, session);
+
+            case "pay_loan_menu" -> loanPaymentFlowService.handlePayLoanMenu(to, session);
+            case "confirm_pay_loan" -> loanPaymentFlowService.handleConfirmPayLoan(to, session);
+            case "cancel_pay_loan" -> loanPaymentFlowService.handleCancelPayLoan(to, session);
+
+            case "payslip_menu" -> payslipFlowService.handlePayslipMenu(to, session);
+            case "confirm_payslip" -> payslipFlowService.handleConfirmPayslip(to, session);
+            case "cancel_payslip" -> payslipFlowService.handleCancelPayslip(to, session);
+
+            case "loan_statement_menu" -> loanDocumentFlowService.handleLoanStatementMenu(to, session);
+            case "confirm_loan_statement" -> loanDocumentFlowService.handleConfirmLoanStatement(to, session);
+            case "cancel_loan_statement" -> loanDocumentFlowService.handleCancelLoanStatement(to, session);
+
+            case "loan_clearance_menu" -> loanDocumentFlowService.handleLoanClearanceMenu(to, session);
+            case "confirm_loan_clearance" -> loanDocumentFlowService.handleConfirmLoanClearance(to, session);
+            case "cancel_loan_clearance" -> loanDocumentFlowService.handleCancelLoanClearance(to, session);
 
             default ->
                     messageService.sendTextMessage(to, "You selected: " + buttonId + " (this flow is not ported yet, coming in a future update).");
@@ -193,6 +224,8 @@ public class ConversationService {
 
             case "enter_approval_code" -> loanApprovalFlowService.handleEnterApprovalCode(to, text, session);
             case "approval_payroll_number" -> loanApprovalFlowService.handleApprovalPayrollNumber(to, text, session);
+
+            case "enter_payslip_months" -> payslipFlowService.handleEnterPayslipMonths(to, text, session);
 
             default ->
                     messageService.sendTextMessage(to, "Got it. This part of the conversation is not wired up yet. Try again in a future update!");
