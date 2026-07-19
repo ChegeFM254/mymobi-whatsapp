@@ -32,19 +32,25 @@ public class ConversationService {
     private final WhatsAppMessageService messageService;
     private final AuthenticationFlowService authFlowService;
     private final RegistrationFlowService registrationFlowService;
+    private final ForgotPinFlowService forgotPinFlowService;
+    private final OptOutFlowService optOutFlowService;
 
     public ConversationService(
             SessionStore sessionStore,
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
             AuthenticationFlowService authFlowService,
-            RegistrationFlowService registrationFlowService
+            RegistrationFlowService registrationFlowService,
+            ForgotPinFlowService forgotPinFlowService,
+            OptOutFlowService optOutFlowService
     ) {
         this.sessionStore = sessionStore;
         this.screenService = screenService;
         this.messageService = messageService;
         this.authFlowService = authFlowService;
         this.registrationFlowService = registrationFlowService;
+        this.forgotPinFlowService = forgotPinFlowService;
+        this.optOutFlowService = optOutFlowService;
     }
 
     public Mono<Void> handleIncomingMessage(IncomingMessage message) {
@@ -119,8 +125,8 @@ public class ConversationService {
             case "edit_details" -> registrationFlowService.handleEditDetails(to, session);
             case "exit_edit" -> registrationFlowService.handleExitEdit(to, session);
 
-            case "forgot_pin", "opt_out" ->
-                    messageService.sendTextMessage(to, "This option is not ported yet. Coming in a future update!");
+            case "forgot_pin" -> forgotPinFlowService.handleForgotPin(to, session);
+            case "opt_out" -> optOutFlowService.handleOptOut(to, session);
 
             default ->
                     messageService.sendTextMessage(to, "You selected: " + buttonId + " (this flow is not ported yet, coming in a future update).");
@@ -149,6 +155,13 @@ public class ConversationService {
             case "enter_otp" -> registrationFlowService.handleEnterOtp(to, text, session);
             case "enter_new_pin" -> registrationFlowService.handleEnterNewPin(to, text, session);
             case "confirm_new_pin" -> registrationFlowService.handleConfirmNewPin(to, text, session);
+
+            case "forgot_pin_enter_otp" -> forgotPinFlowService.handleEnterOtp(to, text, session);
+            case "forgot_pin_enter_new_pin" -> forgotPinFlowService.handleEnterNewPin(to, text, session);
+            case "forgot_pin_confirm_new_pin" -> forgotPinFlowService.handleConfirmNewPin(to, text, session);
+
+            case "opt_out_confirmation" -> optOutFlowService.handleOptOutConfirmation(to, text, session);
+            case "opt_out_pin" -> optOutFlowService.handleOptOutPin(to, text, session);
 
             default ->
                     messageService.sendTextMessage(to, "Got it. This part of the conversation is not wired up yet. Try again in a future update!");
