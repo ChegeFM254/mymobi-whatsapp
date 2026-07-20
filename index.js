@@ -1114,13 +1114,23 @@ async function sendMainMenu(to, session) {
     // Loan" label that required an extra tap to find out which one it
     // actually was.
     const loan = currentLoans[to];
-    let loanActionRow;
+    let loanActionRows;
     if (loan && loan.status === "pending_approval") {
-      loanActionRow = { id: "approve_loan_menu", title: "Approve Loan", description: "Enter your approval code" };
+      // Cancel Loan shown directly alongside Approve Loan here too — not
+      // just one screen deeper inside sendApproveLoanDetails — so it's
+      // visible whichever pending-approval screen the user is looking at.
+      loanActionRows = [
+        { id: "approve_loan_menu", title: "Approve Loan", description: "Enter your approval code" },
+        { id: "cancel_loan", title: "Cancel Loan", description: "Cancel this loan application" }
+      ];
     } else if (loan && loan.status === "approved") {
-      loanActionRow = { id: "pay_loan_menu", title: "Pay Loan", description: "Make an early repayment" };
+      loanActionRows = [
+        { id: "pay_loan_menu", title: "Pay Loan", description: "Make an early repayment" }
+      ];
     } else {
-      loanActionRow = { id: "apply_loan", title: "Apply Loan", description: "Apply for an emergency loan" };
+      loanActionRows = [
+        { id: "apply_loan", title: "Apply Loan", description: "Apply for an emergency loan" }
+      ];
     }
 
     const payload = {
@@ -1137,7 +1147,7 @@ async function sendMainMenu(to, session) {
                 sections: [{
                     title: "Options",
                     rows: [
-                        loanActionRow,
+                        ...loanActionRows,
                         { id: "payslip_menu", title: "Payslip", description: "Download your payslip" },
                         { id: "loan_statement_menu", title: "Loan Statement", description: "View your loan details and balance" },
                         { id: "loan_clearance_menu", title: "Loan Clearance Letter", description: "For a fully paid loan" },
