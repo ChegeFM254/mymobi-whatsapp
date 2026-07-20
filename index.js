@@ -13,7 +13,7 @@ const rateLimit = require('express-rate-limit');
 // buttons. Any screen that needs 4+ options (Accept/Decline/Back/Home/
 // Logout, for example) MUST use the interactive "list" type instead —
 // this is what every multi-option menu in this file already does
-// (sendMainMenu, sendEmergencyLoanMenu, sendLoanTenureOptions,
+// (sendMainMenu, sendLoanTenureOptions,
 // sendLoanAmountMenu, sendLoanBreakdown, sendEditOptions).
 //
 // Rule of thumb when adding a new screen:
@@ -1090,19 +1090,37 @@ async function sendPinResetComplete(to, session) {
   await sendMainMenu(to, session);
 }
 
+// Routes the user to their real "home base": the Main Menu if they're
+// still authenticated/in-session (that IS home while logged in — Emergency
+// Loan, Payslip, Loan Statement, etc.), or the Welcome/Home Page if not
+// (Civil Servants / Buy Airtime / Log Out is the correct entry point for a
+// logged-out user). Centralized here so every "Home"/fallback/completion
+// point in the app makes this same decision the same way, rather than
+// scattering isAuthenticated checks across many handlers.
+async function sendHomeScreen(to, session) {
+  if (session && session.isAuthenticated) {
+    await sendMainMenu(to, session);
+  } else {
+    await sendWelcome(to);
+  }
+}
+
 async function sendMainMenu(to, session) {
     if (session) session.currentMenu = "civil_servants_menu";
 
-    // BUG FIX: description used to always say "Apply for emergency loan"
-    // even when the user's real next action there is to approve, cancel,
-    // or pay an existing loan — misleading, since tapping "Emergency
-    // Loan" no longer leads to Apply Loan in those cases.
+    // Collapsed the old two-step "Emergency Loan submenu" into the Main
+    // Menu directly — the top row now IS the user's actual next loan
+    // action (Apply / Approve / Pay), rather than a generic "Emergency
+    // Loan" label that required an extra tap to find out which one it
+    // actually was.
     const loan = currentLoans[to];
-    let emergencyLoanDescription = "Apply for Emergency Loan";
+    let loanActionRow;
     if (loan && loan.status === "pending_approval") {
-      emergencyLoanDescription = "Approve or Cancel Loan Application";
+      loanActionRow = { id: "approve_loan_menu", title: "Approve Loan", description: "Enter your approval code" };
     } else if (loan && loan.status === "approved") {
-      emergencyLoanDescription = "Pay for Emergency Loan";
+      loanActionRow = { id: "pay_loan_menu", title: "Pay Loan", description: "Make an early repayment" };
+    } else {
+      loanActionRow = { id: "apply_loan", title: "Apply Loan", description: "Apply for an emergency loan" };
     }
 
     const payload = {
@@ -1119,7 +1137,7 @@ async function sendMainMenu(to, session) {
                 sections: [{
                     title: "Options",
                     rows: [
-                        { id: "emergency_loan", title: "Emergency Loan", description: emergencyLoanDescription },
+                        loanActionRow,
                         { id: "payslip_menu", title: "Payslip", description: "Download your payslip" },
                         { id: "loan_statement_menu", title: "Loan Statement", description: "View your loan details and balance" },
                         { id: "loan_clearance_menu", title: "Loan Clearance Letter", description: "For a fully paid loan" },
@@ -1132,62 +1150,6 @@ async function sendMainMenu(to, session) {
         }
     };
     await sendMessage(to, payload);
-}
-
-// ==================== EMERGENCY LOAN SCREENS ====================
-
-async function sendEmergencyLoanMenu(to, session) {
-  if (session) session.currentMenu = "emergency_loan_menu";
-
-  const loan = currentLoans[to];
-  let rows;
-
-  if (loan && loan.status === "pending_approval") {
-    // Application submitted, awaiting approval code entry. Apply Loan
-    // and Pay Loan have no purpose here — per spec, only these options
-    // are relevant until the pending application is resolved.
-    rows = [
-      { id: "approve_loan_menu", title: "Approve Loan", description: "Enter your approval code" },
-      { id: "cancel_loan", title: "Cancel Loan", description: "Cancel this loan application" },
-      { id: "back", title: "Back", description: "Go back" },
-      { id: "home", title: "Home", description: "Return to home" },
-      { id: "logout", title: "Logout", description: "Log out of the app" }
-    ];
-  } else if (loan && loan.status === "approved") {
-    // Loan is approved/disbursed with an outstanding balance. Apply Loan
-    // isn't relevant until this one is fully paid.
-    rows = [
-      { id: "pay_loan_menu", title: "Pay Loan", description: "Make an early repayment" },
-      { id: "back", title: "Back", description: "Go back" },
-      { id: "home", title: "Home", description: "Return to home" },
-      { id: "logout", title: "Logout", description: "Log out of the app" }
-    ];
-  } else {
-    // No loan, or previous one is fully paid/cancelled — free to apply.
-    rows = [
-      { id: "apply_loan", title: "Apply Loan", description: "Apply for an emergency loan" },
-      { id: "back", title: "Back", description: "Go back" },
-      { id: "home", title: "Home", description: "Return to home" },
-      { id: "logout", title: "Logout", description: "Log out of the app" }
-    ];
-  }
-
-  const payload = {
-    messaging_product: "whatsapp",
-    to: to,
-    type: "interactive",
-    interactive: {
-      type: "list",
-      header: { type: "text", text: "Emergency Loan" },
-      body: { text: "What would you like to do?" },
-      footer: { text: "MyMobi" },
-      action: {
-        button: "Select Option",
-        sections: [{ title: "Options", rows: rows }]
-      }
-    }
-  };
-  await sendMessage(to, payload);
 }
 
 async function sendLoanTenureOptions(to, session) {
@@ -1494,12 +1456,11 @@ const EDIT_FIELD_LABELS = {
 // "some_id" -> the function that shows the menu it was reached from.
 const MENU_BACK_MAP = {
   civil_servants_menu: (to, session) => sendWelcome(to),                    // Civil Servants Menu -> Welcome
-  emergency_loan_menu: (to, session) => sendMainMenu(to, session),          // Emergency Loan submenu -> Civil Servants Menu
-  loan_tenure_menu: (to, session) => sendEmergencyLoanMenu(to, session),    // Loan tenure list (Select Period) -> Emergency Loan submenu
+  loan_tenure_menu: (to, session) => sendMainMenu(to, session),             // Loan tenure list (Select Period) -> Main Menu
   loan_amount_menu: (to, session) => sendLoanTenureOptions(to, session),    // Loan Amount menu -> Select Period page
   loan_breakdown_menu: (to, session) => sendLoanAmountMenu(to, session),    // Loan breakdown -> Loan Amount menu
-  approve_loan_details_menu: (to, session) => sendEmergencyLoanMenu(to, session), // Approve Loan details -> Emergency Loan submenu
-  pay_loan_menu: (to, session) => sendEmergencyLoanMenu(to, session),       // Pay Loan options -> Emergency Loan submenu
+  approve_loan_details_menu: (to, session) => sendMainMenu(to, session),    // Approve Loan details -> Main Menu
+  pay_loan_menu: (to, session) => sendMainMenu(to, session),                // Pay Loan options -> Main Menu
   pay_loan_confirm_menu: (to, session) => sendPayLoanOptions(to, session)   // Pay Loan confirm -> Pay Loan options
 };
 
@@ -1531,7 +1492,7 @@ async function handleButton(to, id, session) {
     // misleading, since the bot understood it fine, the feature just
     // isn't built yet. Now consistent with get_payslip's treatment.
     await sendTextMessage(to, "You selected Buy Airtime. (Feature coming soon)");
-    await sendWelcome(to);
+    await sendHomeScreen(to, session);
   }
   // ==================== CIVIL SERVANTS MENU: Log In / Register / Forgot PIN / Opt Out ====================
   // Replaces the old "Enter PIN" auth menu — multi-channel users (USSD,
@@ -1669,18 +1630,15 @@ async function handleButton(to, id, session) {
     const fieldName = EDIT_FIELD_LABELS[id] || "field";
     await sendTextMessage(to, `Enter new ${fieldName}:`);
   }
-  else if (id === "emergency_loan") {
-    await sendEmergencyLoanMenu(to, session);
-  }
   else if (id === "apply_loan") {
     const existingLoan = currentLoans[to];
     if (existingLoan && (existingLoan.status === "pending_approval" || existingLoan.status === "approved")) {
-      // Defensive: sendEmergencyLoanMenu already hides "Apply Loan" while
-      // a loan is active, so this should only fire on a stale/replayed
-      // button tap. Confirmed rule: no new applications until the
-      // current loan is fully repaid.
+      // Defensive: sendMainMenu already hides "Apply Loan" while a loan
+      // is active, so this should only fire on a stale/replayed button
+      // tap. Confirmed rule: no new applications until the current loan
+      // is fully repaid.
       await sendTextMessage(to, "You already have an active loan. Please complete or repay it before applying for a new one.");
-      await sendEmergencyLoanMenu(to, session);
+      await sendMainMenu(to, session);
       return;
     }
     await sendLoanTenureOptions(to, session);
@@ -1699,7 +1657,7 @@ async function handleButton(to, id, session) {
       // Defensive: shouldn't happen in normal flow, but avoids a crash
       // if a stale button is tapped after the session moved on.
       await sendTextMessage(to, "That loan application has expired. Let's start again.");
-      await sendEmergencyLoanMenu(to, session);
+      await sendMainMenu(to, session);
       return;
     }
     session.step = "enter_payroll_number";
@@ -1711,14 +1669,14 @@ async function handleButton(to, id, session) {
     delete session.loanAmount;
     delete session.loanBreakdown;
     await sendTextMessage(to, "Loan application declined.");
-    await sendEmergencyLoanMenu(to, session);
+    await sendMainMenu(to, session);
   }
   // ==================== APPROVE LOAN ====================
   else if (id === "approve_loan_menu") {
     const loan = currentLoans[to];
     if (!loan || loan.status !== "pending_approval") {
       await sendTextMessage(to, "There's no pending loan application to approve.");
-      await sendEmergencyLoanMenu(to, session);
+      await sendMainMenu(to, session);
       return;
     }
     await sendApproveLoanDetails(to, session);
@@ -1742,18 +1700,18 @@ async function handleButton(to, id, session) {
     }
     delete currentLoans[to];
     await sendTextMessage(to, "Your loan application has been successfully cancelled.");
-    await sendWelcome(to);
+    await sendHomeScreen(to, session);
   }
   else if (id === "cancel_loan_no") {
     // Returns to the pending-loan menu (Approve Loan / Cancel Loan), per spec.
-    await sendEmergencyLoanMenu(to, session);
+    await sendMainMenu(to, session);
   }
   // ==================== PAY LOAN (EARLY REPAYMENT) ====================
   else if (id === "pay_loan_menu") {
     const loan = currentLoans[to];
     if (!loan || loan.status !== "approved") {
       await sendTextMessage(to, "There's no active loan to pay.");
-      await sendEmergencyLoanMenu(to, session);
+      await sendMainMenu(to, session);
       return;
     }
     await sendPayLoanOptions(to, session);
@@ -1768,7 +1726,7 @@ async function handleButton(to, id, session) {
 
     if (!loan || !installments) {
       await sendTextMessage(to, "That payment session has expired. Let's start again.");
-      await sendEmergencyLoanMenu(to, session);
+      await sendMainMenu(to, session);
       return;
     }
 
@@ -1806,9 +1764,10 @@ async function handleButton(to, id, session) {
 
       if (isFullyPaid) {
         await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. Your loan has been fully paid. Thank you for using MyMobi services.`);
-        // Loan fully settled — that "session" with this loan is over, so
-        // send the user back to Welcome/Home rather than the Main Menu.
-        await sendWelcome(to);
+        // The user is still logged in/in-session after this, so their
+        // home base is the Main Menu, not the Welcome/Home Page — see
+        // sendHomeScreen().
+        await sendHomeScreen(to, session);
       } else {
         await sendTextMessage(to, `Your installment of KES ${payAmount.toLocaleString()} Ref: ${loan.refNo} has been paid. You have a loan balance of KES ${remainingBalance.toLocaleString()}. Thank you for using MyMobi services.`);
         // Balance remains — keep the user in the Main Menu since they may
@@ -1940,11 +1899,13 @@ async function handleButton(to, id, session) {
     // came FROM, not always the top-level Welcome screen. MENU_BACK_MAP
     // looks up the previous screen based on session.currentMenu, which
     // each navigable menu function sets on itself when it's shown.
-    const goBack = MENU_BACK_MAP[session.currentMenu] || ((t, s) => sendWelcome(t));
+    const goBack = MENU_BACK_MAP[session.currentMenu] || ((t, s) => sendHomeScreen(t, s));
     await goBack(to, session);
   }
   else if (id === "home") {
-    await sendWelcome(to);
+    // Home means "go to my home base" — the Main Menu while still
+    // logged in, or the Welcome/Home Page if not. See sendHomeScreen().
+    await sendHomeScreen(to, session);
   }
   else if (id === "logout") {
     // Clear the pending 60-second inactivity timer right away — otherwise
@@ -1964,7 +1925,7 @@ async function handleButton(to, id, session) {
   else {
     // Fallback for unrecognized button ids so users never get silence
     await sendTextMessage(to, "Sorry, I didn't understand that option. Returning to the main menu.");
-    await sendWelcome(to);
+    await sendHomeScreen(to, session);
   }
 }
 
@@ -2118,7 +2079,7 @@ async function handleTextInput(to, text, session) {
       if (session.payrollNumberAttempts >= 3) {
         await sendTextMessage(to, "Too many incorrect attempts. Your loan application has been cancelled for your security.");
         delete session.payrollNumberAttempts;
-        await sendEmergencyLoanMenu(to, session);
+        await sendMainMenu(to, session);
         return;
       }
 
@@ -2194,7 +2155,7 @@ async function handleTextInput(to, text, session) {
           return;
         }
         await sendTextMessage(to, `Approval Code ${approvalCode}`);
-        await sendEmergencyLoanMenu(to, session);
+        await sendMainMenu(to, session);
       } catch (err) {
         // Ignore errors in this simulated delayed delivery
       }
@@ -2219,7 +2180,7 @@ async function handleTextInput(to, text, session) {
 
     if (!loan || loan.status !== "pending_approval") {
       await sendTextMessage(to, "That loan application is no longer pending. Let's start again.");
-      await sendEmergencyLoanMenu(to, session);
+      await sendMainMenu(to, session);
       return;
     }
 
@@ -2238,7 +2199,7 @@ async function handleTextInput(to, text, session) {
 
       if (loan.approvalCodeAttempts >= 3) {
         await sendTextMessage(to, "Too many incorrect attempts. Please try again later.");
-        await sendEmergencyLoanMenu(to, session);
+        await sendMainMenu(to, session);
       } else {
         const attemptsLeft = 3 - loan.approvalCodeAttempts;
         await sendTextMessage(to, `Incorrect code. You have ${attemptsLeft} attempt(s) remaining.`);
@@ -2252,7 +2213,7 @@ async function handleTextInput(to, text, session) {
 
     if (!loan || loan.status !== "pending_approval") {
       await sendTextMessage(to, "That loan application is no longer pending. Let's start again.");
-      await sendEmergencyLoanMenu(to, session);
+      await sendMainMenu(to, session);
       return;
     }
 
@@ -2277,7 +2238,7 @@ async function handleTextInput(to, text, session) {
 
       if (loan.approvalPayrollAttempts >= 3) {
         await sendTextMessage(to, "Too many incorrect attempts. Please try approving your loan again later.");
-        await sendEmergencyLoanMenu(to, session);
+        await sendMainMenu(to, session);
         return;
       }
 
@@ -2292,7 +2253,7 @@ async function handleTextInput(to, text, session) {
     delete session.approvalPayrollNumber;
 
     await sendTextMessage(to, "Your loan approval has been received and is being processed. Please wait for an SMS notification from MyMobi.");
-    await sendWelcome(to);
+    await sendHomeScreen(to, session);
     return;
   }
 
@@ -2542,8 +2503,17 @@ async function handleTextInput(to, text, session) {
 
   // Fallback for unrecognized step values so users never get silence
   await sendTextMessage(to, "Sorry, something went wrong. Let's start over.");
-  await sendWelcome(to);
-  delete userSessions[to];
+  if (session && session.isAuthenticated) {
+    // Still logged in — reset back to a safe state rather than fully
+    // wiping the session, so what we just showed (Main Menu) matches
+    // what's actually true: they're still authenticated, not logged out.
+    session.step = "welcome";
+    session.currentMenu = undefined;
+    await sendHomeScreen(to, session);
+  } else {
+    await sendWelcome(to);
+    delete userSessions[to];
+  }
 }
 
 async function sendTextMessage(to, text) {
