@@ -156,7 +156,6 @@ public class ConversationService {
             case "forgot_pin" -> forgotPinFlowService.handleForgotPin(to, session);
             case "opt_out" -> optOutFlowService.handleOptOut(to, session);
 
-            case "emergency_loan" -> loanApplicationFlowService.handleEmergencyLoan(to, session);
             case "apply_loan" -> loanApplicationFlowService.handleApplyLoan(to, session);
             case "start_loan_amount_entry" -> loanApplicationFlowService.handleStartLoanAmountEntry(to, session);
             case "accept_loan" -> loanApplicationFlowService.handleAcceptLoan(to, session);
