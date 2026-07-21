@@ -23,7 +23,7 @@ public class ScreenMessageService {
                 "type", "interactive",
                 "interactive", Map.of(
                         "type", "list",
-                        "header", Map.of("type", "text", "text", "Welcome to MyMobi [Java]"),
+                        "header", Map.of("type", "text", "text", "Welcome to MyMobi [JAVA]"),
                         "body", Map.of("text", "Select a service"),
                         "footer", Map.of("text", "MyMobi Emergency Loan"),
                         "action", Map.of(
