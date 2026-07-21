@@ -11,9 +11,11 @@ import java.util.Map;
 public class ScreenMessageService {
 
     private final WhatsAppMessageService messageService;
+    private final com.mfstechnologies.mymobi.session.LoanStore loanStore;
 
-    public ScreenMessageService(WhatsAppMessageService messageService) {
+    public ScreenMessageService(WhatsAppMessageService messageService, com.mfstechnologies.mymobi.session.LoanStore loanStore) {
         this.messageService = messageService;
+        this.loanStore = loanStore;
     }
 
     public Mono<Void> sendWelcome(String to) {
