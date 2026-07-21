@@ -11,6 +11,13 @@ import reactor.core.publisher.Mono;
 
 import java.util.Optional;
 
+/**
+ * Pay Loan (early repayment) flow - the final piece of the loan
+ * lifecycle, reached once a loan is approved. Direct equivalent of the
+ * corresponding section of handleButton() / handleTextInput() in the
+ * Node.js version, including the paymentInProgress guard against a
+ * double-tap triggering payment twice.
+ */
 @Service
 public class LoanPaymentFlowService {
 
@@ -33,8 +40,7 @@ public class LoanPaymentFlowService {
     public Mono<Void> handlePayLoanMenu(String to, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"approved".equals(loanOpt.get().getStatus())) {
-            String status = loanOpt.map(Loan::getStatus).orElse(null);
-            return screenService.sendEmergencyLoanMenu(to, status);
+            return screenService.sendMainMenu(to);
         }
 
         Loan loan = loanOpt.get();
@@ -47,6 +53,9 @@ public class LoanPaymentFlowService {
         return screenService.sendPayLoanOptions(to, remaining, monthlyInstallment);
     }
 
+    /**
+     * @param installmentsButtonId something like "pay_installments_2" - see the prefix routing in ConversationService
+     */
     public Mono<Void> handlePayInstallmentsSelect(String to, String installmentsButtonId, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"approved".equals(loanOpt.get().getStatus())) {
@@ -86,6 +95,9 @@ public class LoanPaymentFlowService {
 
         int installments = session.getPendingPaymentInstallments();
 
+        // TODO: replace with a real M-Pesa STK push call once the
+        // backend exists. For now this always succeeds immediately,
+        // matching triggerMpesaStkPush() in the Node.js version.
         log.info("mpesa_stk_push_simulated to={} installments={}", to, installments);
 
         loan.setInstallmentsPaid(loan.getInstallmentsPaid() + installments);
@@ -103,12 +115,12 @@ public class LoanPaymentFlowService {
 
         int remaining = loan.getTenureMonths() - loan.getInstallmentsPaid();
         return messageService.sendTextMessage(to, "Payment received. You have " + remaining + " installment(s) remaining.")
-                .then(screenService.sendEmergencyLoanMenu(to, "approved"));
+                .then(screenService.sendMainMenu(to));
     }
 
     public Mono<Void> handleCancelPayLoan(String to, UserSession session) {
         session.setPendingPaymentInstallments(null);
-        return screenService.sendEmergencyLoanMenu(to, "approved");
+        return screenService.sendMainMenu(to);
     }
 
     private Integer parseInstallmentsCount(String buttonId) {
