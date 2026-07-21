@@ -49,6 +49,8 @@ class LoanApprovalFlowServiceTest {
         return loan;
     }
 
+    // ==================== APPROVE LOAN MENU ====================
+
     @Test
     void approveLoanMenuShowsDetailsWhenLoanIsPendingApproval() {
         loanStore.save(FROM, pendingLoan());
@@ -63,13 +65,15 @@ class LoanApprovalFlowServiceTest {
     @Test
     void approveLoanMenuRedirectsWhenNoLoanExists() {
         UserSession session = new UserSession();
-        when(screenService.sendEmergencyLoanMenu(FROM, null)).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         approvalFlow.handleApproveLoanMenu(FROM, session).block();
 
-        verify(screenService).sendEmergencyLoanMenu(FROM, null);
+        verify(screenService).sendMainMenu(FROM);
         verify(screenService, never()).sendApproveLoanDetails(anyString(), any());
     }
+
+    // ==================== APPROVAL CODE ====================
 
     @Test
     void correctApprovalCodeAdvancesToPayrollNumberStep() {
@@ -109,6 +113,8 @@ class LoanApprovalFlowServiceTest {
         assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
     }
 
+    // ==================== APPROVAL PAYROLL NUMBER ====================
+
     @Test
     void matchingPayrollNumberApprovesTheLoan() {
         Loan loan = pendingLoan();
@@ -145,12 +151,14 @@ class LoanApprovalFlowServiceTest {
         assertThat(loan.getStatus()).isEqualTo("pending_approval");
     }
 
+    // ==================== CANCEL LOAN ====================
+
     @Test
     void confirmingCancelRemovesTheLoan() {
         loanStore.save(FROM, pendingLoan());
         UserSession session = new UserSession();
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendEmergencyLoanMenu(FROM, null)).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         approvalFlow.handleCancelLoanYes(FROM, session).block();
 
@@ -161,11 +169,11 @@ class LoanApprovalFlowServiceTest {
     void decliningCancelKeepsTheLoanPending() {
         loanStore.save(FROM, pendingLoan());
         UserSession session = new UserSession();
-        when(screenService.sendEmergencyLoanMenu(FROM, "pending_approval")).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         approvalFlow.handleCancelLoanNo(FROM, session).block();
 
         assertThat(loanStore.findByPhoneNumber(FROM)).isPresent();
-        verify(screenService).sendEmergencyLoanMenu(FROM, "pending_approval");
+        verify(screenService).sendMainMenu(FROM);
     }
 }
