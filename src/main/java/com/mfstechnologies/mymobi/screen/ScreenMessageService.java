@@ -7,6 +7,20 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Builds and sends the various interactive screens shown to users -
+ * direct equivalent of the many sendXxx() functions in the Node.js
+ * version (sendWelcome, sendMainMenu, sendOptIn, etc). This class will
+ * grow to hold each of those as the corresponding flow gets ported -
+ * starting here with just Welcome, the very first screen in the whole
+ * conversation flow.
+ *
+ * STANDING CONVENTION carried over from the Node version: WhatsApp's
+ * interactive "button" message type supports a MAXIMUM of 3 buttons.
+ * Anything needing 4+ options (or any Back/Home/Logout combination) must
+ * use the interactive "list" type instead. Keep this in mind for every
+ * screen added here.
+ */
 @Service
 public class ScreenMessageService {
 
@@ -18,6 +32,15 @@ public class ScreenMessageService {
         this.loanStore = loanStore;
     }
 
+    /**
+     * "Go to my home base" - the Main Menu if still authenticated, or
+     * the Welcome screen if not. Direct equivalent of sendHomeScreen()
+     * in the Node.js version. Use this (not a bare sendWelcome) for the
+     * Home button and for any completion/defensive-fallback path where
+     * the person might still be mid-session - e.g. after successfully
+     * approving or paying off a loan, or a "something changed
+     * unexpectedly" guard within an already-authenticated flow.
+     */
     public Mono<Void> sendHomeScreen(String to, com.mfstechnologies.mymobi.model.UserSession session) {
         if (session != null && session.isAuthenticated()) {
             return sendMainMenu(to);
@@ -25,6 +48,10 @@ public class ScreenMessageService {
         return sendWelcome(to);
     }
 
+    /**
+     * The Welcome/Home screen - direct equivalent of sendWelcome() in the
+     * Node.js version, including the Log Out option added there later.
+     */
     public Mono<Void> sendWelcome(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
@@ -51,7 +78,13 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
-    public Mono<Void> sendCivilServantsMenu(String to) {
+    /**
+     * The pre-login "Civil Servants" screen - Log In / Register / Forgot
+     * PIN / Opt Out. Direct equivalent of sendCivilServantsMenu() in the
+     * Node.js version (the multi-channel-aware menu that replaced the
+     * old "Enter PIN" auth screen).
+     */
+public Mono<Void> sendCivilServantsMenu(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
                 "to", to,
@@ -78,6 +111,14 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
+    /**
+     * The post-login Main Menu. Direct equivalent of sendMainMenu() in
+     * the Node.js version - the old separate "Emergency Loan" submenu
+     * has been collapsed directly into this screen's top row(s), so the
+     * user's actual next loan action (Apply/Approve/Pay) is visible
+     * immediately, without an extra tap. Cancel Loan shows directly
+     * alongside Approve Loan here too, not just one screen deeper.
+     */
     public Mono<Void> sendMainMenu(String to) {
         com.mfstechnologies.mymobi.model.Loan loan = loanStore.findByPhoneNumber(to).orElse(null);
         java.util.List<Map<String, Object>> loanActionRows;
@@ -123,7 +164,12 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
-    public Mono<Void> sendOptIn(String to) {
+    /**
+     * Registration: opt-in confirmation. Direct equivalent of sendOptIn()
+     * in the Node.js version. Only 2 options - fits within the 3-button
+     * cap, so "button" type is fine here (see standing convention above).
+     */
+public Mono<Void> sendOptIn(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
                 "to", to,
@@ -142,6 +188,10 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
+    /**
+     * Registration: terms & conditions acceptance. Direct equivalent of
+     * sendTerms() in the Node.js version.
+     */
     public Mono<Void> sendTerms(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
@@ -161,6 +211,11 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
+    /**
+     * Registration: shows the collected KYC details for confirmation
+     * before proceeding to OTP. Direct equivalent of sendConfirmation()
+     * in the Node.js version.
+     */
     public Mono<Void> sendConfirmation(String to, com.mfstechnologies.mymobi.model.UserSession session) {
         String details = String.format("""
                 Confirm Details:
@@ -197,7 +252,12 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
-    public Mono<Void> sendEditOptions(String to) {
+    /**
+     * Registration: pick which KYC field to edit. Direct equivalent of
+     * sendEditOptions() in the Node.js version. 6 options, so this needs
+     * "list" type per the standing convention.
+     */
+public Mono<Void> sendEditOptions(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
                 "to", to,
@@ -226,6 +286,10 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
+    /**
+     * Apply Loan: pick a repayment tenure. Direct equivalent of
+     * sendLoanTenureOptions() in the Node.js version.
+     */
     public Mono<Void> sendLoanTenureOptions(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
@@ -255,6 +319,10 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
+    /**
+     * Apply Loan: reached via Back from the breakdown screen. Direct
+     * equivalent of sendLoanAmountMenu() in the Node.js version.
+     */
     public Mono<Void> sendLoanAmountMenu(String to, int loanLimit, int tenureMonths) {
         String monthLabel = tenureMonths > 1 ? "months" : "month";
         Map<String, Object> payload = Map.of(
@@ -282,7 +350,11 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
-    public Mono<Void> sendLoanBreakdown(String to, com.mfstechnologies.mymobi.model.LoanBreakdown breakdown) {
+    /**
+     * Apply Loan: fee breakdown and Accept/Decline. Direct equivalent of
+     * sendLoanBreakdown() in the Node.js version.
+     */
+public Mono<Void> sendLoanBreakdown(String to, com.mfstechnologies.mymobi.model.LoanBreakdown breakdown) {
         String details = String.format(
                 "Loan %,d\nUpfront Fees %,d\nDisbursement %,d\nMonthly Installment %,d\nPlatform Fee %,d",
                 breakdown.loanAmount(),
@@ -319,42 +391,11 @@ public class ScreenMessageService {
         return messageService.sendMessage(to, payload);
     }
 
-public Mono<Void> sendApproveLoanDetails(String to, com.mfstechnologies.mymobi.model.Loan loan) {
-        String details = String.format(
-                "Loan Amount: KES %,d\nTenure: %d month(s)\nDue Date: %s\nStatus: %s\n\nEnter your Approval Code to proceed.",
-                loan.getLoanAmount(),
-                loan.getTenureMonths(),
-                loan.getDueDate(),
-                loan.getStatus()
-        );
-
-        Map<String, Object> payload = Map.of(
-                "messaging_product", "whatsapp",
-                "to", to,
-                "type", "interactive",
-                "interactive", Map.of(
-                        "type", "list",
-                        "header", Map.of("type", "text", "text", "Approve Loan"),
-                        "body", Map.of("text", details),
-                        "footer", Map.of("text", "MyMobi Emergency Loan"),
-                        "action", Map.of(
-                                "button", "Select Option",
-                                "sections", List.of(Map.of(
-                                        "title", "Options",
-                                        "rows", List.of(
-                                                Map.of("id", "enter_approval_code_menu", "title", "Enter Approval Code", "description", "Type the code you received"),
-                                                Map.of("id", "cancel_loan", "title", "Cancel Loan", "description", "Cancel this loan application"),
-                                                Map.of("id", "back", "title", "Back", "description", "Go back"),
-                                                Map.of("id", "home", "title", "Home", "description", "Return to home"),
-                                                Map.of("id", "logout", "title", "Log Out", "description", "Log out of the app")
-                                        )
-                                ))
-                        )
-                )
-        );
-        return messageService.sendMessage(to, payload);
-    }
-
+    /**
+     * Approve Loan: shows the pending loan's details and prompts for the
+     * approval code. Direct equivalent of the details screen in the
+     * Node.js version's Approve Loan flow.
+     */
     public Mono<Void> sendApproveLoanDetails(String to, com.mfstechnologies.mymobi.model.Loan loan) {
         String details = String.format(
                 "Loan Amount: KES %,d\nTenure: %d month(s)\nDue Date: %s\nStatus: %s\n\nEnter your Approval Code to proceed.",
@@ -391,7 +432,11 @@ public Mono<Void> sendApproveLoanDetails(String to, com.mfstechnologies.mymobi.m
         return messageService.sendMessage(to, payload);
     }
 
-    public Mono<Void> sendCancelLoanConfirm(String to) {
+    /**
+     * Cancel Loan: a single Yes/No confirmation. Direct equivalent of
+     * the Cancel Loan confirmation screen in the Node.js version.
+     */
+public Mono<Void> sendCancelLoanConfirm(String to) {
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
                 "to", to,
@@ -410,6 +455,11 @@ public Mono<Void> sendApproveLoanDetails(String to, com.mfstechnologies.mymobi.m
         return messageService.sendMessage(to, payload);
     }
 
+    /**
+     * Pay Loan: dynamic installment options based on how many remain.
+     * Direct equivalent of the dynamic pay-loan menu in the Node.js
+     * version.
+     */
     public Mono<Void> sendPayLoanOptions(String to, int remainingInstallments, int monthlyInstallmentAmount) {
         java.util.List<Map<String, Object>> rows = new java.util.ArrayList<>();
         for (int n = 1; n <= remainingInstallments; n++) {
@@ -442,7 +492,12 @@ public Mono<Void> sendApproveLoanDetails(String to, com.mfstechnologies.mymobi.m
         return messageService.sendMessage(to, payload);
     }
 
-    public Mono<Void> sendPayLoanConfirm(String to, int installments, int totalAmount, int remainingBalanceAfter) {
+    /**
+     * Pay Loan: confirmation before triggering payment. Direct
+     * equivalent of the pay-loan confirmation screen in the Node.js
+     * version.
+     */
+public Mono<Void> sendPayLoanConfirm(String to, int installments, int totalAmount, int remainingBalanceAfter) {
         String body = String.format(
                 "You are about to pay %d installment(s) totaling KES %,d.\n\nRemaining balance after this payment: %d installment(s).\n\nProceed?",
                 installments, totalAmount, remainingBalanceAfter
@@ -466,6 +521,11 @@ public Mono<Void> sendApproveLoanDetails(String to, com.mfstechnologies.mymobi.m
         return messageService.sendMessage(to, payload);
     }
 
+    /**
+     * Payslip: cost confirmation before generating the document. Direct
+     * equivalent of the payslip confirmation screen in the Node.js
+     * version.
+     */
     public Mono<Void> sendPayslipConfirm(String to, int months, double cost) {
         String body = String.format("Payslip for %d month(s): KES %.2f\n\nProceed?", months, cost);
 
@@ -487,6 +547,9 @@ public Mono<Void> sendApproveLoanDetails(String to, com.mfstechnologies.mymobi.m
         return messageService.sendMessage(to, payload);
     }
 
+    /**
+     * Loan Statement: cost confirmation before generating the document.
+     */
     public Mono<Void> sendLoanStatementConfirm(String to, double cost) {
         String body = String.format("Loan Statement: KES %.2f\n\nProceed?", cost);
 
@@ -508,7 +571,12 @@ public Mono<Void> sendApproveLoanDetails(String to, com.mfstechnologies.mymobi.m
         return messageService.sendMessage(to, payload);
     }
 
-    public Mono<Void> sendLoanClearanceConfirm(String to, double cost) {
+    /**
+     * Loan Clearance Letter: cost confirmation before generating the
+     * document. Only reachable once the flow has already confirmed the
+     * loan status is "paid".
+     */
+public Mono<Void> sendLoanClearanceConfirm(String to, double cost) {
         String body = String.format("Loan Clearance Letter: KES %.2f\n\nProceed?", cost);
 
         Map<String, Object> payload = Map.of(
