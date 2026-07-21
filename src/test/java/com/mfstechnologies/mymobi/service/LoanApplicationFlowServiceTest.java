@@ -40,29 +40,7 @@ class LoanApplicationFlowServiceTest {
         loanFlow = new LoanApplicationFlowService(screenService, messageService, loanStore, userStore, calculationService);
     }
 
-    @Test
-    void emergencyLoanMenuPassesNullStatusWhenNoLoanExists() {
-        UserSession session = new UserSession();
-        when(screenService.sendEmergencyLoanMenu(FROM, null)).thenReturn(Mono.empty());
-
-        loanFlow.handleEmergencyLoan(FROM, session).block();
-
-        verify(screenService).sendEmergencyLoanMenu(FROM, null);
-    }
-
-    @Test
-    void emergencyLoanMenuPassesTheRealLoanStatusWhenOneExists() {
-        Loan loan = new Loan();
-        loan.setStatus("approved");
-        loanStore.save(FROM, loan);
-
-        UserSession session = new UserSession();
-        when(screenService.sendEmergencyLoanMenu(FROM, "approved")).thenReturn(Mono.empty());
-
-        loanFlow.handleEmergencyLoan(FROM, session).block();
-
-        verify(screenService).sendEmergencyLoanMenu(FROM, "approved");
-    }
+    // ==================== APPLY LOAN ====================
 
     @Test
     void applyLoanStartsTenureSelectionWhenNoActiveLoan() {
@@ -83,12 +61,14 @@ class LoanApplicationFlowServiceTest {
 
         UserSession session = new UserSession();
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendEmergencyLoanMenu(FROM, "pending_approval")).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         loanFlow.handleApplyLoan(FROM, session).block();
 
         verify(screenService, never()).sendLoanTenureOptions(anyString());
     }
+
+    // ==================== TENURE SELECTION ====================
 
     @Test
     void selectingATenurePopulatesSessionAndPromptsForAmount() {
@@ -102,6 +82,8 @@ class LoanApplicationFlowServiceTest {
         assertThat(session.getStep()).isEqualTo("enter_loan_amount");
         verify(messageService).sendTextMessage(eq(FROM), contains("40000"));
     }
+
+    // ==================== LOAN AMOUNT ====================
 
     @Test
     void nonNumericLoanAmountIsRejected() {
@@ -151,6 +133,8 @@ class LoanApplicationFlowServiceTest {
         assertThat(session.getCurrentMenu()).isEqualTo("loan_breakdown_menu");
     }
 
+    // ==================== ACCEPT / DECLINE ====================
+
     @Test
     void acceptingTheLoanPromptsForPayrollNumber() {
         UserSession session = new UserSession();
@@ -162,18 +146,20 @@ class LoanApplicationFlowServiceTest {
     }
 
     @Test
-    void decliningClearsSessionAndReturnsToEmergencyLoanMenu() {
+    void decliningClearsSessionAndReturnsToMainMenu() {
         UserSession session = new UserSession();
         session.setLoanAmount(15000);
         session.setLoanTenureMonths(1);
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendEmergencyLoanMenu(FROM, null)).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         loanFlow.handleDeclineLoan(FROM, session).block();
 
         assertThat(session.getLoanAmount()).isNull();
         assertThat(session.getLoanTenureMonths()).isNull();
     }
+
+    // ==================== PAYROLL NUMBER + SUBMISSION ====================
 
     @Test
     void payrollNumberNotMatchingRegisteredUpnIncrementsAttempts() {
@@ -186,7 +172,7 @@ class LoanApplicationFlowServiceTest {
         session.setLoanTenureMonths(1);
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        loanFlow.handleEnterPayrollNumber(FROM, "10000000", session).block();
+        loanFlow.handleEnterPayrollNumber(FROM, "10000000", session).block(); // wrong UPN
 
         assertThat(session.getPayrollNumberAttempts()).isEqualTo(1);
         assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
@@ -203,11 +189,11 @@ class LoanApplicationFlowServiceTest {
         session.setLoanTenureMonths(1);
         session.setPayrollNumberAttempts(2);
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendEmergencyLoanMenu(FROM, null)).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         loanFlow.handleEnterPayrollNumber(FROM, "10000000", session).block();
 
-        assertThat(session.getLoanAmount()).isNull();
+        assertThat(session.getLoanAmount()).isNull(); // cleared
         assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
     }
 
@@ -230,18 +216,20 @@ class LoanApplicationFlowServiceTest {
         assertThat(submitted.getPayrollNumber()).isEqualTo("19999999");
         assertThat(submitted.getRefNo()).isNotBlank();
         assertThat(submitted.getApprovalCode()).matches("^\\d{6}$");
-        assertThat(session.getLoanAmount()).isNull();
+        assertThat(session.getLoanAmount()).isNull(); // session fields cleared after submission
     }
 
+    // ==================== BACK NAVIGATION ====================
+
     @Test
-    void backFromLoanTenureMenuGoesToEmergencyLoanMenu() {
+    void backFromLoanTenureMenuGoesToMainMenu() {
         UserSession session = new UserSession();
         session.setCurrentMenu("loan_tenure_menu");
-        when(screenService.sendEmergencyLoanMenu(FROM, null)).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         loanFlow.handleBack(FROM, session).block();
 
-        verify(screenService).sendEmergencyLoanMenu(FROM, null);
+        verify(screenService).sendMainMenu(FROM);
     }
 
     @Test
@@ -270,7 +258,7 @@ class LoanApplicationFlowServiceTest {
 
     @Test
     void backWithNoTrackedContextFallsBackToWelcome() {
-        UserSession session = new UserSession();
+        UserSession session = new UserSession(); // currentMenu is null
         when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         loanFlow.handleBack(FROM, session).block();
