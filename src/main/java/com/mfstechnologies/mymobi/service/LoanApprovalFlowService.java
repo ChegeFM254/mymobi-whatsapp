@@ -15,6 +15,15 @@ import reactor.core.publisher.Mono;
 import java.time.Instant;
 import java.util.Optional;
 
+/**
+ * Approve Loan and Cancel Loan flows - both reached from a loan that is
+ * currently pending_approval. Direct equivalent of the corresponding
+ * sections of handleButton() / handleTextInput() in the Node.js
+ * version.
+ *
+ * NOTE ON SCOPE: this covers Approve/Cancel only. Pay Loan (early
+ * repayment on an approved loan) is the next piece to port.
+ */
 @Service
 public class LoanApprovalFlowService {
 
@@ -38,11 +47,12 @@ public class LoanApprovalFlowService {
         this.userStore = userStore;
     }
 
+    // ==================== APPROVE LOAN ====================
+
     public Mono<Void> handleApproveLoanMenu(String to, UserSession session) {
         Optional<Loan> loan = loanStore.findByPhoneNumber(to);
         if (loan.isEmpty() || !"pending_approval".equals(loan.get().getStatus())) {
-            String status = loan.map(Loan::getStatus).orElse(null);
-            return screenService.sendEmergencyLoanMenu(to, status);
+            return screenService.sendMainMenu(to);
         }
 
         return screenService.sendApproveLoanDetails(to, loan.get());
@@ -124,6 +134,8 @@ public class LoanApprovalFlowService {
         return messageService.sendTextMessage(to, "Incorrect " + what + ". You have " + attemptsLeft + " attempt(s) remaining.");
     }
 
+    // ==================== CANCEL LOAN ====================
+
     public Mono<Void> handleCancelLoan(String to, UserSession session) {
         return screenService.sendCancelLoanConfirm(to);
     }
@@ -132,10 +144,10 @@ public class LoanApprovalFlowService {
         loanStore.delete(to);
         log.info("loan_cancelled to={}", to);
         return messageService.sendTextMessage(to, "Your loan application has been cancelled.")
-                .then(screenService.sendEmergencyLoanMenu(to, null));
+                .then(screenService.sendMainMenu(to));
     }
 
     public Mono<Void> handleCancelLoanNo(String to, UserSession session) {
-        return screenService.sendEmergencyLoanMenu(to, "pending_approval");
+        return screenService.sendMainMenu(to);
     }
 }
