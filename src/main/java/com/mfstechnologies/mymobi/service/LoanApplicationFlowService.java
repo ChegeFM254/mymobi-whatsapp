@@ -22,6 +22,15 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * The Apply Loan flow - tenure selection, amount entry, fee breakdown,
+ * and submission (with payroll number verified against the registered
+ * UPN). Direct equivalent of the corresponding section of
+ * handleButton() / handleTextInput() in the Node.js version.
+ *
+ * NOTE ON SCOPE: this covers Apply Loan only. Approve/Cancel/Pay Loan
+ * live in their own dedicated flow services.
+ */
 @Service
 public class LoanApplicationFlowService {
 
@@ -55,10 +64,7 @@ public class LoanApplicationFlowService {
         this.calculationService = calculationService;
     }
 
-    public Mono<Void> handleEmergencyLoan(String to, UserSession session) {
-        String status = loanStore.findByPhoneNumber(to).map(Loan::getStatus).orElse(null);
-        return screenService.sendEmergencyLoanMenu(to, status);
-    }
+    // ==================== APPLY LOAN ====================
 
     public Mono<Void> handleApplyLoan(String to, UserSession session) {
         Optional<Loan> existing = loanStore.findByPhoneNumber(to);
@@ -67,7 +73,7 @@ public class LoanApplicationFlowService {
 
         if (hasActiveLoan) {
             return messageService.sendTextMessage(to, "You already have an active loan. Please complete or repay it before applying for a new one.")
-                    .then(screenService.sendEmergencyLoanMenu(to, existing.get().getStatus()));
+                    .then(screenService.sendMainMenu(to));
         }
 
         session.setCurrentMenu("loan_tenure_menu");
@@ -117,6 +123,8 @@ public class LoanApplicationFlowService {
         return screenService.sendLoanBreakdown(to, breakdown);
     }
 
+    // ==================== BREAKDOWN: ACCEPT / DECLINE ====================
+
     public Mono<Void> handleAcceptLoan(String to, UserSession session) {
         session.setStep("enter_loan_payroll_number");
         return messageService.sendTextMessage(to, "Please Enter Payroll Number to complete the transaction:");
@@ -125,8 +133,10 @@ public class LoanApplicationFlowService {
     public Mono<Void> handleDeclineLoan(String to, UserSession session) {
         clearLoanApplicationFields(session);
         return messageService.sendTextMessage(to, "Loan application declined.")
-                .then(screenService.sendEmergencyLoanMenu(to, null));
+                .then(screenService.sendMainMenu(to));
     }
+
+    // ==================== PAYROLL NUMBER + SUBMISSION ====================
 
     public Mono<Void> handleEnterPayrollNumber(String to, String text, UserSession session) {
         if (!FieldValidators.isValidUpn(text)) {
@@ -142,7 +152,7 @@ public class LoanApplicationFlowService {
             if (session.getPayrollNumberAttempts() >= MAX_PAYROLL_ATTEMPTS) {
                 clearLoanApplicationFields(session);
                 return messageService.sendTextMessage(to, "Too many incorrect attempts. Your loan application has been cancelled for your security.")
-                        .then(screenService.sendEmergencyLoanMenu(to, null));
+                        .then(screenService.sendMainMenu(to));
             }
 
             int attemptsLeft = MAX_PAYROLL_ATTEMPTS - session.getPayrollNumberAttempts();
@@ -182,6 +192,16 @@ public class LoanApplicationFlowService {
         return messageService.sendTextMessage(to, "Your loan request has been submitted. Please wait for an SMS from MyMobi.");
     }
 
+    /**
+     * Simulates SMS delivery of the approval code, arriving as a
+     * separate WhatsApp message a few seconds later, followed by the
+     * Main Menu (now showing Approve Loan / Cancel Loan).
+     * TODO: remove once a real SMS/backend delivers this for real.
+     *
+     * Includes a staleness check: only delivers if the loan is STILL the
+     * same one, still pending - avoiding a confusing stale delivery if
+     * the loan was cancelled or superseded in the meantime.
+     */
     private void deliverApprovalCodeAfterDelay(String to, String approvalCode, String refNo) {
         CompletableFuture.runAsync(
                 () -> {
@@ -196,7 +216,7 @@ public class LoanApplicationFlowService {
                     }
 
                     messageService.sendTextMessage(to, "Approval Code " + approvalCode)
-                            .then(screenService.sendEmergencyLoanMenu(to, "pending_approval"))
+                            .then(screenService.sendMainMenu(to))
                             .doOnError(err -> log.error("Failed to deliver approval code to {}: {}", to, err.getMessage()))
                             .subscribe();
                 },
@@ -204,12 +224,19 @@ public class LoanApplicationFlowService {
         );
     }
 
+    // ==================== BACK NAVIGATION ====================
+
+    /**
+     * Centralized "Back" handling. Currently the only screens with
+     * contextual back-navigation are the loan screens; anything else
+     * (or no tracked context) falls back to Welcome, matching the
+     * simplest cases from the Node version's MENU_BACK_MAP.
+     */
     public Mono<Void> handleBack(String to, UserSession session) {
         String currentMenu = session.getCurrentMenu();
 
         if ("loan_tenure_menu".equals(currentMenu)) {
-            String status = loanStore.findByPhoneNumber(to).map(Loan::getStatus).orElse(null);
-            return screenService.sendEmergencyLoanMenu(to, status);
+            return screenService.sendMainMenu(to);
         }
         if ("loan_amount_menu".equals(currentMenu)) {
             session.setCurrentMenu("loan_tenure_menu");
