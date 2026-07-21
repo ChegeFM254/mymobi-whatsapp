@@ -44,6 +44,8 @@ class LoanPaymentFlowServiceTest {
         return loan;
     }
 
+    // ==================== PAY LOAN MENU ====================
+
     @Test
     void payLoanMenuShowsOptionsForAnApprovedLoan() {
         loanStore.save(FROM, approvedLoan(3, 0));
@@ -62,12 +64,14 @@ class LoanPaymentFlowServiceTest {
         loanStore.save(FROM, pending);
 
         UserSession session = new UserSession();
-        when(screenService.sendEmergencyLoanMenu(FROM, "pending_approval")).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         paymentFlow.handlePayLoanMenu(FROM, session).block();
 
         verify(screenService, never()).sendPayLoanOptions(anyString(), anyInt(), anyInt());
     }
+
+    // ==================== INSTALLMENT SELECTION ====================
 
     @Test
     void selectingAValidInstallmentCountShowsConfirmation() {
@@ -83,7 +87,7 @@ class LoanPaymentFlowServiceTest {
 
     @Test
     void selectingMoreInstallmentsThanRemainingIsRejected() {
-        loanStore.save(FROM, approvedLoan(3, 2));
+        loanStore.save(FROM, approvedLoan(3, 2)); // only 1 remaining
         UserSession session = new UserSession();
         when(screenService.sendPayLoanOptions(FROM, 1, 14442)).thenReturn(Mono.empty());
 
@@ -92,6 +96,8 @@ class LoanPaymentFlowServiceTest {
         assertThat(session.getPendingPaymentInstallments()).isNull();
     }
 
+    // ==================== CONFIRM PAYMENT ====================
+
     @Test
     void confirmingAPartialPaymentUpdatesInstallmentsAndStaysApproved() {
         Loan loan = approvedLoan(3, 0);
@@ -99,7 +105,7 @@ class LoanPaymentFlowServiceTest {
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(1);
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendEmergencyLoanMenu(FROM, "approved")).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         paymentFlow.handleConfirmPayLoan(FROM, session).block();
 
@@ -110,7 +116,7 @@ class LoanPaymentFlowServiceTest {
 
     @Test
     void confirmingTheFinalPaymentMarksTheLoanAsPaid() {
-        Loan loan = approvedLoan(3, 2);
+        Loan loan = approvedLoan(3, 2); // 1 remaining
         loanStore.save(FROM, loan);
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(1);
@@ -138,11 +144,13 @@ class LoanPaymentFlowServiceTest {
         verifyNoInteractions(messageService);
     }
 
+    // ==================== CANCEL ====================
+
     @Test
-    void cancelingPaymentClearsSelectionAndReturnsToEmergencyLoanMenu() {
+    void cancelingPaymentClearsSelectionAndReturnsToMainMenu() {
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(2);
-        when(screenService.sendEmergencyLoanMenu(FROM, "approved")).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         paymentFlow.handleCancelPayLoan(FROM, session).block();
 
