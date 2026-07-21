@@ -25,7 +25,7 @@ public class ScreenMessageService {
                 "type", "interactive",
                 "interactive", Map.of(
                         "type", "list",
-                        "header", Map.of("type", "text", "text", "Welcome to MyMobi [JAVA]"),
+                        "header", Map.of("type", "text", "text", "Welcome to MyMobi"),
                         "body", Map.of("text", "Select a service"),
                         "footer", Map.of("text", "MyMobi Emergency Loan"),
                         "action", Map.of(
@@ -72,6 +72,32 @@ public class ScreenMessageService {
     }
 
     public Mono<Void> sendMainMenu(String to) {
+        com.mfstechnologies.mymobi.model.Loan loan = loanStore.findByPhoneNumber(to).orElse(null);
+        java.util.List<Map<String, Object>> loanActionRows;
+
+        if (loan != null && "pending_approval".equals(loan.getStatus())) {
+            loanActionRows = List.of(
+                    Map.of("id", "approve_loan_menu", "title", "Approve Loan", "description", "Enter your approval code"),
+                    Map.of("id", "cancel_loan", "title", "Cancel Loan", "description", "Cancel this loan application")
+            );
+        } else if (loan != null && "approved".equals(loan.getStatus())) {
+            loanActionRows = List.of(
+                    Map.of("id", "pay_loan_menu", "title", "Pay Loan", "description", "Make an early repayment")
+            );
+        } else {
+            loanActionRows = List.of(
+                    Map.of("id", "apply_loan", "title", "Apply Loan", "description", "Apply for an emergency loan")
+            );
+        }
+
+        java.util.List<Map<String, Object>> rows = new java.util.ArrayList<>(loanActionRows);
+        rows.add(Map.of("id", "payslip_menu", "title", "Payslip", "description", "Download your payslip"));
+        rows.add(Map.of("id", "loan_statement_menu", "title", "Loan Statement", "description", "View your loan details and balance"));
+        rows.add(Map.of("id", "loan_clearance_menu", "title", "Loan Clearance Letter", "description", "For a fully paid loan"));
+        rows.add(Map.of("id", "back", "title", "Back", "description", "Go back"));
+        rows.add(Map.of("id", "home", "title", "Home", "description", "Return to home"));
+        rows.add(Map.of("id", "logout", "title", "Log Out", "description", "Log out of the app"));
+
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
                 "to", to,
@@ -83,18 +109,7 @@ public class ScreenMessageService {
                         "footer", Map.of("text", "MyMobi"),
                         "action", Map.of(
                                 "button", "Select Option",
-                                "sections", List.of(Map.of(
-                                        "title", "Options",
-                                        "rows", List.of(
-                                                Map.of("id", "emergency_loan", "title", "Emergency Loan", "description", "Apply for Emergency Loan"),
-                                                Map.of("id", "payslip_menu", "title", "Payslip", "description", "Download your payslip"),
-                                                Map.of("id", "loan_statement_menu", "title", "Loan Statement", "description", "View your loan details and balance"),
-                                                Map.of("id", "loan_clearance_menu", "title", "Loan Clearance Letter", "description", "For a fully paid loan"),
-                                                Map.of("id", "back", "title", "Back", "description", "Go back"),
-                                                Map.of("id", "home", "title", "Home", "description", "Return to home"),
-                                                Map.of("id", "logout", "title", "Log Out", "description", "Log out of the app")
-                                        )
-                                ))
+                                "sections", List.of(Map.of("title", "Options", "rows", rows))
                         )
                 )
         );
@@ -198,40 +213,6 @@ public class ScreenMessageService {
                                                 Map.of("id", "exit_edit", "title", "Exit", "description", "Return to Confirm Details")
                                         )
                                 ))
-                        )
-                )
-        );
-        return messageService.sendMessage(to, payload);
-    }
-
-    public Mono<Void> sendEmergencyLoanMenu(String to, String loanStatus) {
-        java.util.List<Map<String, Object>> rows = new java.util.ArrayList<>();
-
-        if ("pending_approval".equals(loanStatus)) {
-            rows.add(Map.of("id", "approve_loan_menu", "title", "Approve Loan", "description", "Approve your pending loan"));
-            rows.add(Map.of("id", "cancel_loan", "title", "Cancel Loan", "description", "Cancel this loan application"));
-        } else if ("approved".equals(loanStatus)) {
-            rows.add(Map.of("id", "pay_loan_menu", "title", "Pay Loan", "description", "Make an early repayment"));
-        } else {
-            rows.add(Map.of("id", "apply_loan", "title", "Apply Loan", "description", "Apply for an emergency loan"));
-        }
-
-        rows.add(Map.of("id", "back", "title", "Back", "description", "Go back"));
-        rows.add(Map.of("id", "home", "title", "Home", "description", "Return to home"));
-        rows.add(Map.of("id", "logout", "title", "Log Out", "description", "Log out of the app"));
-
-        Map<String, Object> payload = Map.of(
-                "messaging_product", "whatsapp",
-                "to", to,
-                "type", "interactive",
-                "interactive", Map.of(
-                        "type", "list",
-                        "header", Map.of("type", "text", "text", "Emergency Loan"),
-                        "body", Map.of("text", "What would you like to do?"),
-                        "footer", Map.of("text", "MyMobi"),
-                        "action", Map.of(
-                                "button", "Select Option",
-                                "sections", List.of(Map.of("title", "Options", "rows", rows))
                         )
                 )
         );
@@ -441,6 +422,7 @@ public class ScreenMessageService {
         );
         return messageService.sendMessage(to, payload);
     }
+
     public Mono<Void> sendPayslipConfirm(String to, int months, double cost) {
         String body = String.format("Payslip for %d month(s): KES %.2f\n\nProceed?", months, cost);
 
@@ -503,6 +485,7 @@ public class ScreenMessageService {
         );
         return messageService.sendMessage(to, payload);
     }
+
     private String nullToEmpty(String value) {
         return value == null ? "" : value;
     }
