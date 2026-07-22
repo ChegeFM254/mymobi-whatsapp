@@ -98,83 +98,8 @@ class LoanApprovalFlowServiceTest {
         assertThat(loan.getApprovalCodeAttempts()).isEqualTo(1);
         assertThat(session.getStep()).isNotEqualTo("approval_payroll_number");
     }
-    @Test
-    void thirdWrongApprovalCodeCancelsTheLoan() {
-        Loan loan = pendingLoan();
-        loan.setApprovalCodeAttempts(2);
-        loanStore.save(FROM, loan);
-        UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
-
-        approvalFlow.handleEnterApprovalCode(FROM, "000000", session).block();
-
-        assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
-    }
-
-    // ==================== APPROVAL PAYROLL NUMBER ====================
 
     @Test
-    void matchingPayrollNumberApprovesTheLoan() {
-        Loan loan = pendingLoan();
-        loanStore.save(FROM, loan);
-        RegisteredUser user = new RegisteredUser();
-        user.setUpn("19999999");
-        userStore.save(FROM, user);
-
-        UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
-
-        approvalFlow.handleApprovalPayrollNumber(FROM, "19999999", session).block();
-
-        assertThat(loan.getStatus()).isEqualTo("approved");
-        assertThat(loan.getApprovedAt()).isNotNull();
-        verify(screenService).sendHomeScreen(FROM, session);
-        verify(screenService, never()).sendWelcome(anyString());
-    }
-
-    @Test
-    void nonMatchingPayrollNumberIncrementsSeparateAttemptCounter() {
-        Loan loan = pendingLoan();
-        loanStore.save(FROM, loan);
-        RegisteredUser user = new RegisteredUser();
-        user.setUpn("19999999");
-        userStore.save(FROM, user);
-
-        UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-
-        approvalFlow.handleApprovalPayrollNumber(FROM, "10000000", session).block();
-
-        assertThat(loan.getApprovalPayrollAttempts()).isEqualTo(1);
-        assertThat(loan.getApprovalCodeAttempts()).isZero();
-        assertThat(loan.getStatus()).isEqualTo("pending_approval");
-    }
-
-    // ==================== CANCEL LOAN ====================
-
-    @Test
-    void confirmingCancelRemovesTheLoan() {
-        loanStore.save(FROM, pendingLoan());
-        UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
-
-        approvalFlow.handleCancelLoanYes(FROM, session).block();
-
-        assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
-    }
-
-    @Test
-    void decliningCancelKeepsTheLoanPending() {
-        loanStore.save(FROM, pendingLoan());
-        UserSession session = new UserSession();
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
-
-        approvalFlow.handleCancelLoanNo(FROM, session).block();
-
-       @Test
     void thirdWrongApprovalCodeCancelsTheLoan() {
         Loan loan = pendingLoan();
         loan.setApprovalCodeAttempts(2);
