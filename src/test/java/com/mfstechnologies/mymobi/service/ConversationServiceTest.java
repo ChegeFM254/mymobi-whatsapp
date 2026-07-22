@@ -211,15 +211,19 @@ class ConversationServiceTest {
     }
 
     @Test
-    void homeButtonDelegatesToTheContextAwareHomeScreen() {
+    void homeButtonAlwaysReturnsToWelcomeEvenWhenAuthenticated() {
         UserSession session = new UserSession();
+        session.setAuthenticated(true);
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
+        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.9", FROM, null, "home");
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(screenService).sendHomeScreen(FROM, session);
+        // Deliberate product decision: Home is always a full reset to
+        // Welcome, distinct from Back which stays contextual - even for
+        // an authenticated person.
+        verify(screenService).sendWelcome(FROM);
     }
 }
