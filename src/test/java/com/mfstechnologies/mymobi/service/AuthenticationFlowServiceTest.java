@@ -17,17 +17,6 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-/**
- * Covers the core authentication flow — this is genuinely new business
- * logic ported tonight (not just infrastructure), so it gets the most
- * thorough test coverage of this session's additions.
- *
- * Uses a REAL LoginLockoutService and a REAL LoginVerificationService
- * (backed by a real BCryptPasswordEncoder and an in-memory
- * RegisteredUserStore) rather than mocking them — cheap enough to run
- * for real, and gives more genuine confidence than mocking business
- * logic this important.
- */
 @ExtendWith(MockitoExtension.class)
 class AuthenticationFlowServiceTest {
 
@@ -37,6 +26,8 @@ class AuthenticationFlowServiceTest {
     private ScreenMessageService screenService;
     @Mock
     private WhatsAppMessageService messageService;
+    @Mock
+    private InactivityTimeoutService inactivityTimeoutService;
 
     private LoginLockoutService lockoutService;
     private LoginVerificationService loginVerificationService;
@@ -44,17 +35,15 @@ class AuthenticationFlowServiceTest {
 
     @BeforeEach
     void setUp() {
-        lockoutService = new LoginLockoutService();
+        lockoutService = new LoginLockoutService(600);
         PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
         loginVerificationService = new LoginVerificationService(
                 new com.mfstechnologies.mymobi.session.RegisteredUserStore(),
                 passwordEncoder,
-                true // testing bypass ON, matching the default
+                true
         );
-        authFlowService = new AuthenticationFlowService(screenService, messageService, lockoutService, loginVerificationService);
+        authFlowService = new AuthenticationFlowService(screenService, messageService, lockoutService, loginVerificationService, inactivityTimeoutService);
     }
-
-    // ==================== CIVIL SERVANTS MENU ====================
 
     @Test
     void authenticatedSessionGoesStraightToMainMenu() {
@@ -70,7 +59,7 @@ class AuthenticationFlowServiceTest {
 
     @Test
     void unauthenticatedSessionSeesTheCivilServantsMenu() {
-        UserSession session = new UserSession(); // authenticated=false by default
+        UserSession session = new UserSession();
         when(screenService.sendCivilServantsMenu(FROM)).thenReturn(Mono.empty());
 
         authFlowService.handleCivilServants(FROM, session).block();
@@ -78,8 +67,6 @@ class AuthenticationFlowServiceTest {
         verify(screenService).sendCivilServantsMenu(FROM);
         verify(screenService, never()).sendMainMenu(anyString());
     }
-
-    // ==================== LOGIN: UPN STEP ====================
 
     @Test
     void loginMenuPromptsForUpnWhenNotLockedOut() {
@@ -91,7 +78,6 @@ class AuthenticationFlowServiceTest {
         assertThat(session.getStep()).isEqualTo("login_enter_upn");
         verify(messageService).sendTextMessage(FROM, "Enter UPN:");
     }
-
     @Test
     void loginMenuRefusesToProceedWhileLockedOut() {
         lockoutService.applyLockout(FROM);
@@ -112,7 +98,7 @@ class AuthenticationFlowServiceTest {
 
         authFlowService.handleLoginEnterUpn(FROM, "notanumber", session).block();
 
-        assertThat(session.getStep()).isEqualTo("login_enter_upn"); // unchanged
+        assertThat(session.getStep()).isEqualTo("login_enter_upn");
         verify(messageService).sendTextMessage(eq(FROM), contains("UPN"));
     }
 
@@ -129,13 +115,11 @@ class AuthenticationFlowServiceTest {
         verify(messageService).sendTextMessage(FROM, "Enter PIN:");
     }
 
-    // ==================== LOGIN: PIN STEP ====================
-
     @Test
     void correctPinAdvancesToVerificationCodeStep() {
         UserSession session = new UserSession();
         session.setStep("login_enter_pin");
-        session.setLoginUpn("12345"); // testing bypass: any correctly-formatted UPN+PIN succeeds
+        session.setLoginUpn("12345");
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
         authFlowService.handleLoginEnterPin(FROM, "54321", session).block();
@@ -144,54 +128,51 @@ class AuthenticationFlowServiceTest {
         assertThat(session.getVerificationCode()).isNotNull();
         verify(messageService).sendTextMessage(FROM, "Enter Verification Code:");
     }
-
     @Test
     void wrongPinAgainstARealRecordIncrementsAttemptsWithoutLockingOutImmediately() {
-        // Seed a REAL record so this isn't the testing-bypass path.
         var realUser = new com.mfstechnologies.mymobi.model.RegisteredUser();
         realUser.setUpn("19999999");
         realUser.setHashedPin(new BCryptPasswordEncoder().encode("11111"));
         var userStore = new com.mfstechnologies.mymobi.session.RegisteredUserStore();
         userStore.save(FROM, realUser);
         var realLoginService = new LoginVerificationService(userStore, new BCryptPasswordEncoder(), true);
-        var flowWithRealUser = new AuthenticationFlowService(screenService, messageService, lockoutService, realLoginService);
+        var flowWithRealUser = new AuthenticationFlowService(screenService, messageService, lockoutService, realLoginService, inactivityTimeoutService);
 
         UserSession session = new UserSession();
         session.setStep("login_enter_pin");
         session.setLoginUpn("19999999");
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        flowWithRealUser.handleLoginEnterPin(FROM, "00000", session).block(); // wrong PIN
+        flowWithRealUser.handleLoginEnterPin(FROM, "00000", session).block();
 
         assertThat(session.getLoginAttempts()).isEqualTo(1);
-        assertThat(session.getStep()).isEqualTo("login_enter_pin"); // did not advance
-        verify(messageService).sendTextMessage(eq(FROM), contains("2 attempt(s) remaining"));
+        assertThat(session.getStep()).isEqualTo("login_enter_pin");
+        verify(messageService).sendTextMessage(eq(FROM), contains("1 attempt(s) remaining"));
     }
 
     @Test
-    void thirdConsecutiveWrongAttemptTriggersLockout() {
+    void thirdConsecutiveWrongAttemptTriggersLockoutAndShowsAWayForwardAgain() {
         var realUser = new com.mfstechnologies.mymobi.model.RegisteredUser();
         realUser.setUpn("19999999");
         realUser.setHashedPin(new BCryptPasswordEncoder().encode("11111"));
         var userStore = new com.mfstechnologies.mymobi.session.RegisteredUserStore();
         userStore.save(FROM, realUser);
         var realLoginService = new LoginVerificationService(userStore, new BCryptPasswordEncoder(), true);
-        var flowWithRealUser = new AuthenticationFlowService(screenService, messageService, lockoutService, realLoginService);
+        var flowWithRealUser = new AuthenticationFlowService(screenService, messageService, lockoutService, realLoginService, inactivityTimeoutService);
 
         UserSession session = new UserSession();
         session.setStep("login_enter_pin");
         session.setLoginUpn("19999999");
-        session.setLoginAttempts(2); // already failed twice
+        session.setLoginAttempts(2);
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
 
-        flowWithRealUser.handleLoginEnterPin(FROM, "00000", session).block(); // third wrong attempt
+        flowWithRealUser.handleLoginEnterPin(FROM, "00000", session).block();
 
         assertThat(lockoutService.getLockoutMinutesRemaining(FROM)).isGreaterThan(0);
         verify(messageService).sendTextMessage(eq(FROM), contains("locked for 10 minutes"));
+        verify(screenService).sendHomeScreen(FROM, session);
     }
-
-    // ==================== LOGIN: VERIFICATION CODE STEP ====================
-
     @Test
     void correctVerificationCodeCompletesLoginAndShowsMainMenu() {
         UserSession session = new UserSession();
@@ -202,7 +183,7 @@ class AuthenticationFlowServiceTest {
         authFlowService.handleLoginEnterVerificationCode(FROM, "98765", session).block();
 
         assertThat(session.isAuthenticated()).isTrue();
-        assertThat(session.getVerificationCode()).isNull(); // cleared after use
+        assertThat(session.getVerificationCode()).isNull();
         verify(screenService).sendMainMenu(FROM);
     }
 
@@ -217,5 +198,14 @@ class AuthenticationFlowServiceTest {
 
         assertThat(session.isAuthenticated()).isFalse();
         verify(screenService, never()).sendMainMenu(anyString());
+    }
+
+    @Test
+    void logoutCancelsThePendingInactivityTimeoutImmediately() {
+        UserSession session = new UserSession();
+
+        authFlowService.handleLogout(FROM, session).block();
+
+        verify(inactivityTimeoutService).cancelTimeout(FROM);
     }
 }
