@@ -160,8 +160,7 @@ class LoanApplicationFlowServiceTest {
     }
 
     // ==================== PAYROLL NUMBER + SUBMISSION ====================
-
-    @Test
+@Test
     void payrollNumberNotMatchingRegisteredUpnIncrementsAttempts() {
         RegisteredUser user = new RegisteredUser();
         user.setUpn("19999999");
@@ -220,8 +219,7 @@ class LoanApplicationFlowServiceTest {
     }
 
     // ==================== BACK NAVIGATION ====================
-
-    @Test
+@Test
     void backFromLoanTenureMenuGoesToMainMenu() {
         UserSession session = new UserSession();
         session.setCurrentMenu("loan_tenure_menu");
@@ -257,12 +255,12 @@ class LoanApplicationFlowServiceTest {
     }
 
     @Test
-    void backWithNoTrackedContextFallsBackToWelcome() {
+    void backWithNoTrackedContextIsContextAware() {
         UserSession session = new UserSession(); // currentMenu is null
-        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
+        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
 
         loanFlow.handleBack(FROM, session).block();
 
-        verify(screenService).sendWelcome(FROM);
+        verify(screenService).sendHomeScreen(FROM, session);
     }
 }
