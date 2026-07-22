@@ -11,13 +11,6 @@ import reactor.core.publisher.Mono;
 
 import java.util.Optional;
 
-/**
- * Pay Loan (early repayment) flow - the final piece of the loan
- * lifecycle, reached once a loan is approved. Direct equivalent of the
- * corresponding section of handleButton() / handleTextInput() in the
- * Node.js version, including the paymentInProgress guard against a
- * double-tap triggering payment twice.
- */
 @Service
 public class LoanPaymentFlowService {
 
@@ -46,20 +39,17 @@ public class LoanPaymentFlowService {
         Loan loan = loanOpt.get();
         int remaining = loan.getTenureMonths() - loan.getInstallmentsPaid();
         if (remaining <= 0) {
-            return screenService.sendWelcome(to);
+            return screenService.sendHomeScreen(to, session);
         }
 
         int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() : 14442;
         return screenService.sendPayLoanOptions(to, remaining, monthlyInstallment);
     }
 
-    /**
-     * @param installmentsButtonId something like "pay_installments_2" - see the prefix routing in ConversationService
-     */
     public Mono<Void> handlePayInstallmentsSelect(String to, String installmentsButtonId, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"approved".equals(loanOpt.get().getStatus())) {
-            return screenService.sendWelcome(to);
+            return screenService.sendHomeScreen(to, session);
         }
         Loan loan = loanOpt.get();
 
@@ -79,12 +69,11 @@ public class LoanPaymentFlowService {
 
         return screenService.sendPayLoanConfirm(to, selected, total, remainingAfter);
     }
-
     public Mono<Void> handleConfirmPayLoan(String to, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"approved".equals(loanOpt.get().getStatus()) || session.getPendingPaymentInstallments() == null) {
             session.setPendingPaymentInstallments(null);
-            return screenService.sendWelcome(to);
+            return screenService.sendHomeScreen(to, session);
         }
         Loan loan = loanOpt.get();
 
@@ -94,11 +83,10 @@ public class LoanPaymentFlowService {
         loan.setPaymentInProgress(true);
 
         int installments = session.getPendingPaymentInstallments();
+        int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() : 14442;
+        int payAmount = monthlyInstallment * installments;
 
-        // TODO: replace with a real M-Pesa STK push call once the
-        // backend exists. For now this always succeeds immediately,
-        // matching triggerMpesaStkPush() in the Node.js version.
-        log.info("mpesa_stk_push_simulated to={} installments={}", to, installments);
+        log.info("mpesa_stk_push_simulated to={} installments={} payAmount={}", to, installments, payAmount);
 
         loan.setInstallmentsPaid(loan.getInstallmentsPaid() + installments);
         session.setPendingPaymentInstallments(null);
@@ -109,12 +97,21 @@ public class LoanPaymentFlowService {
         if (fullyPaid) {
             loan.setStatus("paid");
             log.info("loan_fully_paid to={} refNo={}", to, loan.getRefNo());
-            return messageService.sendTextMessage(to, "Payment received. Your loan is now fully paid off. Thank you for using MyMobi.")
-                    .then(screenService.sendWelcome(to));
+            String message = String.format(
+                    "Your installment of KES %,d Ref: %s has been paid. Your loan has been fully paid. Thank you for using MyMobi services.",
+                    payAmount, loan.getRefNo()
+            );
+            return messageService.sendTextMessage(to, message)
+                    .then(screenService.sendHomeScreen(to, session));
         }
 
-        int remaining = loan.getTenureMonths() - loan.getInstallmentsPaid();
-        return messageService.sendTextMessage(to, "Payment received. You have " + remaining + " installment(s) remaining.")
+        int remainingInstallments = loan.getTenureMonths() - loan.getInstallmentsPaid();
+        int remainingBalance = monthlyInstallment * remainingInstallments;
+        String message = String.format(
+                "Your installment of KES %,d Ref: %s has been paid. You have a loan balance of KES %,d. Thank you for using MyMobi services.",
+                payAmount, loan.getRefNo(), remainingBalance
+        );
+        return messageService.sendTextMessage(to, message)
                 .then(screenService.sendMainMenu(to));
     }
 
