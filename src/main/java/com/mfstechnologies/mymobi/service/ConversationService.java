@@ -120,11 +120,11 @@ public class ConversationService {
         }
         return Duration.between(lastProcessed, Instant.now()).compareTo(DEBOUNCE) < 0;
     }
+
     private boolean isTriggerWord(String text) {
         String normalized = text.trim().toLowerCase();
         return TRIGGER_WORDS.contains(normalized) || normalized.contains(TRIGGER_SUBSTRING);
     }
-
     private Mono<Void> handleButton(String to, String buttonId, UserSession session) {
         log.info("button_tapped to={} buttonId={}", to, buttonId);
 
@@ -145,7 +145,7 @@ public class ConversationService {
             case "home" -> screenService.sendHomeScreen(to, session);
             case "back" -> loanApplicationFlowService.handleBack(to, session);
 
-            case "buy_airtime" -> messageService.sendTextMessage(to, "Buy Airtime is coming soon. Thank you for your patience.");
+            case "buy_airtime" -> messageService.sendTextMessage(to, "You selected Buy Airtime. (Feature coming soon)");
 
             case "register_menu" -> registrationFlowService.handleRegisterMenu(to, session);
             case "optin_yes" -> registrationFlowService.handleOptInYes(to, session);
@@ -187,7 +187,8 @@ public class ConversationService {
             case "cancel_loan_clearance" -> loanDocumentFlowService.handleCancelLoanClearance(to, session);
 
             default ->
-                    messageService.sendTextMessage(to, "You selected: " + buttonId + " (this flow is not ported yet, coming in a future update).");
+                    messageService.sendTextMessage(to, "Sorry, I didn't understand that option. Returning to the main menu.")
+                            .then(screenService.sendHomeScreen(to, session));
         };
     }
     private Mono<Void> handleText(String to, String text, UserSession session) {
@@ -228,8 +229,20 @@ public class ConversationService {
 
             case "enter_payslip_months" -> payslipFlowService.handleEnterPayslipMonths(to, text, session);
 
-            default ->
-                    messageService.sendTextMessage(to, "Got it. This part of the conversation is not wired up yet. Try again in a future update!");
+            default -> handleUnrecognizedStep(to, session);
         };
+    }
+
+    private Mono<Void> handleUnrecognizedStep(String to, UserSession session) {
+        if (session.isAuthenticated()) {
+            session.setStep("welcome");
+            session.setCurrentMenu(null);
+            return messageService.sendTextMessage(to, "Sorry, something went wrong. Let's start over.")
+                    .then(screenService.sendHomeScreen(to, session));
+        }
+
+        sessionStore.delete(to);
+        return messageService.sendTextMessage(to, "Sorry, something went wrong. Let's start over.")
+                .then(screenService.sendWelcome(to));
     }
 }
