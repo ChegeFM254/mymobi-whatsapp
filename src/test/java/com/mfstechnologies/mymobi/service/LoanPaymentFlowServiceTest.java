@@ -41,6 +41,7 @@ class LoanPaymentFlowServiceTest {
         loan.setInstallmentsPaid(installmentsPaid);
         loan.setBreakdown(new LoanBreakdown(15000, 2943, 32057, 14442, 150));
         loan.setStatus("approved");
+        loan.setRefNo("MVCAGHD1");
         return loan;
     }
 
@@ -97,8 +98,7 @@ class LoanPaymentFlowServiceTest {
     }
 
     // ==================== CONFIRM PAYMENT ====================
-
-    @Test
+@Test
     void confirmingAPartialPaymentUpdatesInstallmentsAndStaysApproved() {
         Loan loan = approvedLoan(3, 0);
         loanStore.save(FROM, loan);
@@ -112,6 +112,8 @@ class LoanPaymentFlowServiceTest {
         assertThat(loan.getInstallmentsPaid()).isEqualTo(1);
         assertThat(loan.getStatus()).isEqualTo("approved");
         assertThat(session.getPendingPaymentInstallments()).isNull();
+        verify(messageService).sendTextMessage(eq(FROM),
+                eq("Your installment of KES 14,442 Ref: MVCAGHD1 has been paid. You have a loan balance of KES 28,884. Thank you for using MyMobi services."));
     }
 
     @Test
@@ -121,26 +123,44 @@ class LoanPaymentFlowServiceTest {
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(1);
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
+        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
 
         paymentFlow.handleConfirmPayLoan(FROM, session).block();
 
         assertThat(loan.getInstallmentsPaid()).isEqualTo(3);
         assertThat(loan.getStatus()).isEqualTo("paid");
-        verify(screenService).sendWelcome(FROM);
+        verify(messageService).sendTextMessage(eq(FROM),
+                eq("Your installment of KES 14,442 Ref: MVCAGHD1 has been paid. Your loan has been fully paid. Thank you for using MyMobi services."));
+        verify(screenService).sendHomeScreen(FROM, session);
+        verify(screenService, never()).sendWelcome(anyString());
     }
 
     @Test
+    void payingTwoInstallmentsAtOnceShowsTheCorrectAmountAndRemainingBalance() {
+        Loan loan = approvedLoan(3, 0);
+        loanStore.save(FROM, loan);
+        UserSession session = new UserSession();
+        session.setPendingPaymentInstallments(2); // paying 2 of 3 in one go
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
+
+        paymentFlow.handleConfirmPayLoan(FROM, session).block();
+
+        assertThat(loan.getInstallmentsPaid()).isEqualTo(2);
+        verify(messageService).sendTextMessage(eq(FROM),
+                eq("Your installment of KES 28,884 Ref: MVCAGHD1 has been paid. You have a loan balance of KES 14,442. Thank you for using MyMobi services."));
+    }
+    @Test
     void paymentInProgressGuardPreventsADoubleTapFromPayingTwice() {
         Loan loan = approvedLoan(3, 0);
-        loan.setPaymentInProgress(true);
+        loan.setPaymentInProgress(true); // simulate a payment already underway
         loanStore.save(FROM, loan);
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(1);
 
         paymentFlow.handleConfirmPayLoan(FROM, session).block();
 
-        assertThat(loan.getInstallmentsPaid()).isZero();
+        assertThat(loan.getInstallmentsPaid()).isZero(); // unaffected by the second tap
         verifyNoInteractions(messageService);
     }
 
