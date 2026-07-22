@@ -15,15 +15,6 @@ import reactor.core.publisher.Mono;
 import java.time.Instant;
 import java.util.Optional;
 
-/**
- * Approve Loan and Cancel Loan flows - both reached from a loan that is
- * currently pending_approval. Direct equivalent of the corresponding
- * sections of handleButton() / handleTextInput() in the Node.js
- * version.
- *
- * NOTE ON SCOPE: this covers Approve/Cancel only. Pay Loan (early
- * repayment on an approved loan) is the next piece to port.
- */
 @Service
 public class LoanApprovalFlowService {
 
@@ -67,7 +58,7 @@ public class LoanApprovalFlowService {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"pending_approval".equals(loanOpt.get().getStatus())) {
             session.setStep("welcome");
-            return screenService.sendWelcome(to);
+            return screenService.sendHomeScreen(to, session);
         }
         Loan loan = loanOpt.get();
 
@@ -82,12 +73,11 @@ public class LoanApprovalFlowService {
         session.setStep("approval_payroll_number");
         return messageService.sendTextMessage(to, "Enter Payroll Number to confirm approval:");
     }
-
     public Mono<Void> handleApprovalPayrollNumber(String to, String text, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"pending_approval".equals(loanOpt.get().getStatus())) {
             session.setStep("welcome");
-            return screenService.sendWelcome(to);
+            return screenService.sendHomeScreen(to, session);
         }
         Loan loan = loanOpt.get();
 
@@ -109,7 +99,7 @@ public class LoanApprovalFlowService {
         log.info("loan_approved to={} refNo={}", to, loan.getRefNo());
 
         return messageService.sendTextMessage(to, "Your loan approval has been received. Thank you for using MyMobi.")
-                .then(screenService.sendWelcome(to));
+                .then(screenService.sendHomeScreen(to, session));
     }
 
     private Mono<Void> recordFailedApprovalAttempt(String to, UserSession session, Loan loan, boolean isCodeAttempt) {
@@ -126,7 +116,7 @@ public class LoanApprovalFlowService {
             loanStore.delete(to);
             session.setStep("welcome");
             return messageService.sendTextMessage(to, "Too many incorrect attempts. Your loan application has been cancelled for your security.")
-                    .then(screenService.sendWelcome(to));
+                    .then(screenService.sendHomeScreen(to, session));
         }
 
         int attemptsLeft = MAX_APPROVAL_ATTEMPTS - attempts;
