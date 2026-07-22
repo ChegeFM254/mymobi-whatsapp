@@ -76,7 +76,8 @@ public class DocumentHtmlService {
     }
     public String generateLoanStatementHtml(RegisteredUser user, Loan loan) {
         int remainingBalance = calculateRemainingBalance(loan);
-        String statusLabel = LOAN_STATUS_LABELS.getOrDefault(loan.getStatus(), loan.getStatus());
+        String rawStatus = loan.getStatus();
+        String statusLabel = rawStatus == null ? "" : LOAN_STATUS_LABELS.getOrDefault(rawStatus, rawStatus);
         String statementDate = LocalDate.now().toString();
 
         String body = """
