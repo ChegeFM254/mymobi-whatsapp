@@ -91,6 +91,7 @@ class ConversationServiceTest {
         verifyNoInteractions(screenService);
         verify(messageService, never()).sendTextMessage(anyString(), anyString());
     }
+
     @Test
     void loanStatementMenuButtonRoutesToLoanDocumentFlowService() {
         UserSession session = new UserSession();
@@ -103,7 +104,6 @@ class ConversationServiceTest {
 
         verify(loanDocumentFlowService).handleLoanStatementMenu(FROM, session);
     }
-
     @Test
     void loanClearanceMenuButtonRoutesToLoanDocumentFlowService() {
         UserSession session = new UserSession();
@@ -131,20 +131,59 @@ class ConversationServiceTest {
     }
 
     @Test
-    void unmappedButtonTapsFallBackToTheGenericStub() {
+    void unmappedButtonTapsShowNodeMatchingFallbackAndReturnHome() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.6", FROM, null, "some_unported_button");
 
         conversationService.handleIncomingMessage(message).block();
 
-        verify(messageService).sendTextMessage(eq(FROM), anyString());
+        verify(messageService).sendTextMessage(eq(FROM),
+                eq("Sorry, I didn't understand that option. Returning to the main menu."));
+        verify(screenService).sendHomeScreen(FROM, session);
         verifyNoInteractions(authFlowService, registrationFlowService, forgotPinFlowService, optOutFlowService,
                 loanApplicationFlowService, loanApprovalFlowService, loanPaymentFlowService, payslipFlowService,
                 loanDocumentFlowService);
     }
+
+    @Test
+    void unmappedTextStepWhenAuthenticatedResetsToMainMenuNotFullLogout() {
+        UserSession session = new UserSession();
+        session.setAuthenticated(true);
+        session.setStep("some_stale_unrecognized_step");
+        when(sessionStore.getOrCreate(FROM)).thenReturn(session);
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
+
+        IncomingMessage message = new IncomingMessage("wamid.10", FROM, "gibberish", null);
+
+        conversationService.handleIncomingMessage(message).block();
+
+        verify(messageService).sendTextMessage(eq(FROM), eq("Sorry, something went wrong. Let's start over."));
+        verify(screenService).sendHomeScreen(FROM, session);
+        assertThat(session.getStep()).isEqualTo("welcome");
+        assertThat(session.getCurrentMenu()).isNull();
+    }
+    @Test
+    void unmappedTextStepWhenNotAuthenticatedShowsWelcomeAndDropsSession() {
+        UserSession session = new UserSession(); // authenticated=false
+        session.setStep("some_stale_unrecognized_step");
+        when(sessionStore.getOrCreate(FROM)).thenReturn(session);
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
+
+        IncomingMessage message = new IncomingMessage("wamid.11", FROM, "gibberish", null);
+
+        conversationService.handleIncomingMessage(message).block();
+
+        verify(messageService).sendTextMessage(eq(FROM), eq("Sorry, something went wrong. Let's start over."));
+        verify(screenService).sendWelcome(FROM);
+        verify(sessionStore).delete(FROM);
+    }
+
     @Test
     void resetSendTurnIsAlwaysCalledBeforeAnyReply() {
         UserSession session = new UserSession();
