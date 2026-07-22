@@ -147,7 +147,7 @@ class AuthenticationFlowServiceTest {
 
         assertThat(session.getLoginAttempts()).isEqualTo(1);
         assertThat(session.getStep()).isEqualTo("login_enter_pin");
-        verify(messageService).sendTextMessage(eq(FROM), contains("1 attempt(s) remaining"));
+        verify(messageService).sendTextMessage(eq(FROM), contains("2 attempt(s) remaining"));
     }
 
     @Test
