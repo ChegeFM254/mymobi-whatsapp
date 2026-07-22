@@ -51,6 +51,8 @@ public class LoanDocumentFlowService {
         this.properties = properties;
     }
 
+    // ==================== LOAN STATEMENT ====================
+
     public Mono<Void> handleLoanStatementMenu(String to, UserSession session) {
         if (loanStore.findByPhoneNumber(to).isEmpty()) {
             return messageService.sendTextMessage(to, "You have no loan on record for a statement.")
@@ -70,11 +72,15 @@ public class LoanDocumentFlowService {
             return messageService.sendTextMessage(to, "Something went wrong. Please try again.")
                     .then(screenService.sendMainMenu(to));
         }
+        RegisteredUser user = userOpt.get();
+        Loan loan = loanOpt.get();
 
-        log.info("mpesa_stk_push_simulated to={} purpose=loan_statement", to);
-
-        String html = documentHtmlService.generateLoanStatementHtml(userOpt.get(), loanOpt.get());
-        return generateAndSendDocumentLink(to, "loan_statement", userOpt.get().getUpn(), html, session);
+        return sendStkPushPrompt(to, DOCUMENT_COST)
+                .then(Mono.defer(() -> {
+                    log.info("mpesa_stk_push_simulated to={} purpose=loan_statement", to);
+                    String html = documentHtmlService.generateLoanStatementHtml(user, loan);
+                    return generateAndSendDocumentLink(to, "loan_statement", "Loan Statement", user.getUpn(), html, session);
+                }));
     }
 
     public Mono<Void> handleCancelLoanStatement(String to, UserSession session) {
@@ -83,7 +89,8 @@ public class LoanDocumentFlowService {
                 .then(screenService.sendMainMenu(to));
     }
 
-    public Mono<Void> handleLoanClearanceMenu(String to, UserSession session) {
+    // ==================== LOAN CLEARANCE LETTER ====================
+public Mono<Void> handleLoanClearanceMenu(String to, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
 
         if (loanOpt.isEmpty()) {
@@ -108,11 +115,15 @@ public class LoanDocumentFlowService {
             return messageService.sendTextMessage(to, "Something went wrong. Please try again.")
                     .then(screenService.sendMainMenu(to));
         }
+        RegisteredUser user = userOpt.get();
+        Loan loan = loanOpt.get();
 
-        log.info("mpesa_stk_push_simulated to={} purpose=loan_clearance", to);
-
-        String html = documentHtmlService.generateLoanClearanceHtml(userOpt.get(), loanOpt.get());
-        return generateAndSendDocumentLink(to, "loan_clearance", userOpt.get().getUpn(), html, session);
+        return sendStkPushPrompt(to, DOCUMENT_COST)
+                .then(Mono.defer(() -> {
+                    log.info("mpesa_stk_push_simulated to={} purpose=loan_clearance", to);
+                    String html = documentHtmlService.generateLoanClearanceHtml(user, loan);
+                    return generateAndSendDocumentLink(to, "loan_clearance", "Loan Clearance Letter", user.getUpn(), html, session);
+                }));
     }
 
     public Mono<Void> handleCancelLoanClearance(String to, UserSession session) {
@@ -121,7 +132,14 @@ public class LoanDocumentFlowService {
                 .then(screenService.sendMainMenu(to));
     }
 
-    private Mono<Void> generateAndSendDocumentLink(String to, String docType, String upn, String html, UserSession session) {
+    // ==================== SHARED ====================
+
+    private Mono<Void> sendStkPushPrompt(String to, double cost) {
+        return messageService.sendTextMessage(to,
+                String.format("You are about to pay KES %.2f to MyMobi account XXXXX. Please enter your Mpesa PIN.", cost));
+    }
+
+    private Mono<Void> generateAndSendDocumentLink(String to, String docType, String docTitle, String upn, String html, UserSession session) {
         StoredDocument document = new StoredDocument();
         document.setPhoneNumber(to);
         document.setDocType(docType);
@@ -137,7 +155,7 @@ public class LoanDocumentFlowService {
         session.setPendingDocumentType(null);
 
         String link = properties.publicBaseUrl() + "/documents/" + token;
-        return messageService.sendTextMessage(to, "Your document is ready. View it securely here (you will be asked for your UPN):\n\n" + link)
+        return messageService.sendTextMessage(to, "Please click on this link to access your " + docTitle + " " + link)
                 .then(screenService.sendMainMenu(to));
     }
 }
