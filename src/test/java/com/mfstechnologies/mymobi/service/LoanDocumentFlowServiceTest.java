@@ -49,6 +49,8 @@ class LoanDocumentFlowServiceTest {
         documentFlow = new LoanDocumentFlowService(screenService, messageService, userStore, loanStore, documentStore, documentHtmlService, properties);
     }
 
+    // ==================== LOAN STATEMENT ====================
+
     @Test
     void loanStatementMenuRefusesWhenNoLoanOnRecord() {
         UserSession session = new UserSession();
@@ -56,7 +58,6 @@ class LoanDocumentFlowServiceTest {
         when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         documentFlow.handleLoanStatementMenu(FROM, session).block();
-
         verify(screenService, never()).sendLoanStatementConfirm(anyString(), anyDouble());
     }
 
@@ -73,6 +74,23 @@ class LoanDocumentFlowServiceTest {
     }
 
     @Test
+    void confirmingLoanStatementSendsStkPushPromptFirst() {
+        RegisteredUser user = new RegisteredUser();
+        user.setUpn("12345");
+        userStore.save(FROM, user);
+        loanStore.save(FROM, new Loan());
+
+        UserSession session = new UserSession();
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
+
+        documentFlow.handleConfirmLoanStatement(FROM, session).block();
+
+        verify(messageService).sendTextMessage(eq(FROM),
+                eq("You are about to pay KES 23.20 to MyMobi account XXXXX. Please enter your Mpesa PIN."));
+    }
+
+    @Test
     void confirmingLoanStatementGeneratesADocumentLink() {
         RegisteredUser user = new RegisteredUser();
         user.setUpn("12345");
@@ -80,16 +98,18 @@ class LoanDocumentFlowServiceTest {
         loanStore.save(FROM, new Loan());
 
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), contains("mymobi-test.onrender.com/documents/"))).thenReturn(Mono.empty());
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
         when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         documentFlow.handleConfirmLoanStatement(FROM, session).block();
 
         assertThat(session.getPendingDocumentType()).isNull();
+        verify(messageService).sendTextMessage(eq(FROM), contains("Please click on this link to access your Loan Statement"));
         verify(messageService).sendTextMessage(eq(FROM), contains("mymobi-test.onrender.com/documents/"));
     }
 
-    @Test
+    // ==================== LOAN CLEARANCE LETTER ====================
+@Test
     void loanClearanceMenuRefusesWhenNoLoanOnRecord() {
         UserSession session = new UserSession();
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
@@ -128,6 +148,24 @@ class LoanDocumentFlowServiceTest {
 
         assertThat(session.getPendingDocumentType()).isEqualTo("loan_clearance");
     }
+    @Test
+    void confirmingLoanClearanceSendsStkPushPromptFirst() {
+        RegisteredUser user = new RegisteredUser();
+        user.setUpn("12345");
+        userStore.save(FROM, user);
+        Loan paid = new Loan();
+        paid.setStatus("paid");
+        loanStore.save(FROM, paid);
+
+        UserSession session = new UserSession();
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
+
+        documentFlow.handleConfirmLoanClearance(FROM, session).block();
+
+        verify(messageService).sendTextMessage(eq(FROM),
+                eq("You are about to pay KES 23.20 to MyMobi account XXXXX. Please enter your Mpesa PIN."));
+    }
 
     @Test
     void confirmingLoanClearanceGeneratesADocumentLink() {
@@ -139,11 +177,12 @@ class LoanDocumentFlowServiceTest {
         loanStore.save(FROM, paid);
 
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), contains("mymobi-test.onrender.com/documents/"))).thenReturn(Mono.empty());
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
         when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
         documentFlow.handleConfirmLoanClearance(FROM, session).block();
 
         assertThat(session.getPendingDocumentType()).isNull();
+        verify(messageService).sendTextMessage(eq(FROM), contains("Please click on this link to access your Loan Clearance Letter"));
     }
 }
