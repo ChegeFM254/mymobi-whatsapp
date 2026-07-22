@@ -36,7 +36,7 @@ class OptOutFlowServiceTest {
     @BeforeEach
     void setUp() {
         userStore = new RegisteredUserStore();
-        lockoutService = new LoginLockoutService();
+        lockoutService = new LoginLockoutService(0);
         optOutFlowService = new OptOutFlowService(screenService, messageService, userStore, passwordEncoder, lockoutService);
     }
 
