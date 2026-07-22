@@ -47,6 +47,8 @@ class ConversationServiceTest {
     private PayslipFlowService payslipFlowService;
     @Mock
     private LoanDocumentFlowService loanDocumentFlowService;
+    @Mock
+    private InactivityTimeoutService inactivityTimeoutService;
 
     private ConversationService conversationService;
 
@@ -58,7 +60,7 @@ class ConversationServiceTest {
                 forgotPinFlowService, optOutFlowService,
                 loanApplicationFlowService, loanApprovalFlowService,
                 loanPaymentFlowService, payslipFlowService,
-                loanDocumentFlowService
+                loanDocumentFlowService, inactivityTimeoutService
         );
     }
 
@@ -89,7 +91,6 @@ class ConversationServiceTest {
         verifyNoInteractions(screenService);
         verify(messageService, never()).sendTextMessage(anyString(), anyString());
     }
-
     @Test
     void loanStatementMenuButtonRoutesToLoanDocumentFlowService() {
         UserSession session = new UserSession();
@@ -144,7 +145,6 @@ class ConversationServiceTest {
                 loanApplicationFlowService, loanApprovalFlowService, loanPaymentFlowService, payslipFlowService,
                 loanDocumentFlowService);
     }
-
     @Test
     void resetSendTurnIsAlwaysCalledBeforeAnyReply() {
         UserSession session = new UserSession();
@@ -156,5 +156,31 @@ class ConversationServiceTest {
         conversationService.handleIncomingMessage(message).block();
 
         verify(messageService).resetSendTurn(FROM);
+    }
+
+    @Test
+    void inactivityTimeoutIsResetOnEveryIncomingMessage() {
+        UserSession session = new UserSession();
+        when(sessionStore.getOrCreate(FROM)).thenReturn(session);
+        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
+
+        IncomingMessage message = new IncomingMessage("wamid.8", FROM, "hi", null);
+
+        conversationService.handleIncomingMessage(message).block();
+
+        verify(inactivityTimeoutService).resetTimeout(FROM);
+    }
+
+    @Test
+    void homeButtonDelegatesToTheContextAwareHomeScreen() {
+        UserSession session = new UserSession();
+        when(sessionStore.getOrCreate(FROM)).thenReturn(session);
+        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
+
+        IncomingMessage message = new IncomingMessage("wamid.9", FROM, null, "home");
+
+        conversationService.handleIncomingMessage(message).block();
+
+        verify(screenService).sendHomeScreen(FROM, session);
     }
 }
