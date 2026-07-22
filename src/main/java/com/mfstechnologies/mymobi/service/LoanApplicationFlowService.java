@@ -22,15 +22,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
-/**
- * The Apply Loan flow - tenure selection, amount entry, fee breakdown,
- * and submission (with payroll number verified against the registered
- * UPN). Direct equivalent of the corresponding section of
- * handleButton() / handleTextInput() in the Node.js version.
- *
- * NOTE ON SCOPE: this covers Apply Loan only. Approve/Cancel/Pay Loan
- * live in their own dedicated flow services.
- */
 @Service
 public class LoanApplicationFlowService {
 
@@ -63,7 +54,6 @@ public class LoanApplicationFlowService {
         this.userStore = userStore;
         this.calculationService = calculationService;
     }
-
     // ==================== APPLY LOAN ====================
 
     public Mono<Void> handleApplyLoan(String to, UserSession session) {
@@ -101,7 +91,6 @@ public class LoanApplicationFlowService {
         return messageService.sendTextMessage(to,
                 "Enter Loan Amount (e.g., 35000). Your limit is KES " + session.getLoanLimit() + ":");
     }
-
     public Mono<Void> handleEnterLoanAmount(String to, String text, UserSession session) {
         Integer amount = parsePositiveInteger(text);
         if (amount == null) {
@@ -161,7 +150,6 @@ public class LoanApplicationFlowService {
 
         return submitLoanApplication(to, text, session);
     }
-
     private Mono<Void> submitLoanApplication(String to, String payrollNumber, UserSession session) {
         LoanBreakdown breakdown = calculationService.calculateBreakdown(session.getLoanAmount(), session.getLoanTenureMonths());
         String refNo = CodeGenerator.generateLoanRefNo();
@@ -229,8 +217,8 @@ public class LoanApplicationFlowService {
     /**
      * Centralized "Back" handling. Currently the only screens with
      * contextual back-navigation are the loan screens; anything else
-     * (or no tracked context) falls back to Welcome, matching the
-     * simplest cases from the Node version's MENU_BACK_MAP.
+     * (or no tracked context) falls back to sendHomeScreen (Main Menu
+     * if authenticated, Welcome otherwise).
      */
     public Mono<Void> handleBack(String to, UserSession session) {
         String currentMenu = session.getCurrentMenu();
@@ -247,7 +235,7 @@ public class LoanApplicationFlowService {
             return screenService.sendLoanAmountMenu(to, session.getLoanLimit(), session.getLoanTenureMonths());
         }
 
-        return screenService.sendWelcome(to);
+        return screenService.sendHomeScreen(to, session);
     }
 
     private void clearLoanApplicationFields(UserSession session) {
