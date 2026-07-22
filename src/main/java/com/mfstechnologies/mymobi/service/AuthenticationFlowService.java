@@ -12,54 +12,38 @@ import reactor.core.publisher.Mono;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
-/**
- * The full authentication flow — Civil Servants menu routing, Log In
- * (UPN -> PIN -> Verification Code, with lockout), and Logout. Direct
- * equivalent of the corresponding sections of handleButton() /
- * handleTextInput() in the Node.js version.
- *
- * NOT yet ported (stubs live in ConversationService's fallback handlers
- * for now): Register/KYC, Forgot PIN, Opt Out. These are next.
- */
 @Service
 public class AuthenticationFlowService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthenticationFlowService.class);
-    private static final long LOGOUT_DELAY_SECONDS = 3; // matches LOGOUT_DELAY_MS in the Node version
+    private static final long LOGOUT_DELAY_SECONDS = 3;
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
     private final LoginLockoutService lockoutService;
     private final LoginVerificationService loginVerificationService;
+    private final InactivityTimeoutService inactivityTimeoutService;
 
     public AuthenticationFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
             LoginLockoutService lockoutService,
-            LoginVerificationService loginVerificationService
+            LoginVerificationService loginVerificationService,
+            InactivityTimeoutService inactivityTimeoutService
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
         this.lockoutService = lockoutService;
         this.loginVerificationService = loginVerificationService;
+        this.inactivityTimeoutService = inactivityTimeoutService;
     }
 
-    // ==================== CIVIL SERVANTS MENU ====================
-
-    /**
-     * Stay logged in for the rest of the session — only Logout or the
-     * inactivity timeout should ever force Log In again (inactivity
-     * timeout itself isn't ported yet — see README). Direct equivalent
-     * of the "civil_servants" button handler in the Node version.
-     */
     public Mono<Void> handleCivilServants(String to, UserSession session) {
         if (session.isAuthenticated()) {
             return screenService.sendMainMenu(to);
         }
         return screenService.sendCivilServantsMenu(to);
     }
-
-    // ==================== LOG IN ====================
 
     public Mono<Void> handleLoginMenu(String to, UserSession session) {
         long lockoutMinutes = lockoutService.getLockoutMinutesRemaining(to);
@@ -82,7 +66,6 @@ public class AuthenticationFlowService {
         session.setStep("login_enter_pin");
         return messageService.sendTextMessage(to, "Enter PIN:");
     }
-
     public Mono<Void> handleLoginEnterPin(String to, String text, UserSession session) {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
             return messageService.sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
@@ -94,7 +77,6 @@ public class AuthenticationFlowService {
             return recordFailedAttemptAndRespond(to, session, "Incorrect UPN or PIN.");
         }
 
-        // Correct UPN + PIN — Verification Code required before Main Menu.
         String code = CodeGenerator.generateFiveDigitCode();
         session.setVerificationCode(code);
         session.setStep("login_enter_verification_code");
@@ -112,7 +94,6 @@ public class AuthenticationFlowService {
             return recordFailedAttemptAndRespond(to, session, "Incorrect code.");
         }
 
-        // UPN + PIN + Verification Code all correct.
         session.setLoginAttempts(0);
         session.setVerificationCode(null);
         session.setLoginUpn(null);
@@ -129,19 +110,13 @@ public class AuthenticationFlowService {
             session.setLoginUpn(null);
             session.setVerificationCode(null);
             return messageService.sendTextMessage(to,
-                    "Too many incorrect attempts. Your account has been temporarily locked for 10 minutes.");
+                    "Too many incorrect attempts. Your account has been temporarily locked for 10 minutes.")
+                    .then(screenService.sendHomeScreen(to, session));
         }
 
         int attemptsLeft = LoginLockoutService.MAX_LOGIN_ATTEMPTS - session.getLoginAttempts();
         return messageService.sendTextMessage(to, reasonPrefix + " You have " + attemptsLeft + " attempt(s) remaining.");
     }
-
-    /**
-     * Simulates SMS delivery of the verification code, arriving as a
-     * separate WhatsApp message a few seconds later — same testing
-     * pattern used throughout the Node.js version (OTP, Approval Code,
-     * etc: TODO, remove once a real SMS/backend delivers this for real).
-     */
     private void deliverCodeAfterDelay(String to, String code) {
         CompletableFuture
                 .runAsync(
@@ -152,15 +127,9 @@ public class AuthenticationFlowService {
                 );
     }
 
-    // ==================== LOGOUT ====================
-
-    /**
-     * Direct equivalent of the "logout" button handler in the Node
-     * version: a short delay, then the session effectively resets (here:
-     * de-authenticated and returned to Welcome-equivalent state) and a
-     * confirmation message is sent.
-     */
     public Mono<Void> handleLogout(String to, UserSession session) {
+        inactivityTimeoutService.cancelTimeout(to);
+
         CompletableFuture.runAsync(
                 () -> {
                     session.setAuthenticated(false);
