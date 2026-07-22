@@ -36,7 +36,7 @@ class ForgotPinFlowServiceTest {
     @BeforeEach
     void setUp() {
         userStore = new RegisteredUserStore();
-        lockoutService = new LoginLockoutService();
+        lockoutService = new LoginLockoutService(600);
         forgotPinFlowService = new ForgotPinFlowService(screenService, messageService, userStore, passwordEncoder, lockoutService);
     }
 
@@ -85,17 +85,18 @@ class ForgotPinFlowServiceTest {
 
         assertThat(session.getStep()).isEqualTo("forgot_pin_enter_new_pin");
     }
-
     @Test
     void thirdWrongOtpAppliesLockout() {
         UserSession session = new UserSession();
         session.setOtp("12345");
         session.setOtpAttempts(2);
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         forgotPinFlowService.handleEnterOtp(FROM, "00000", session).block();
 
         assertThat(lockoutService.getLockoutMinutesRemaining(FROM)).isGreaterThan(0);
+        verify(screenService).sendWelcome(FROM);
     }
 
     @Test
