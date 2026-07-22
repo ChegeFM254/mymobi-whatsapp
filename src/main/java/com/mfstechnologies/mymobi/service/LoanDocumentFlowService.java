@@ -1,5 +1,5 @@
 package com.mfstechnologies.mymobi.service;
-
+n
 import com.mfstechnologies.mymobi.config.WhatsAppProperties;
 import com.mfstechnologies.mymobi.document.DocumentHtmlService;
 import com.mfstechnologies.mymobi.model.Loan;
@@ -55,7 +55,7 @@ public class LoanDocumentFlowService {
 
     public Mono<Void> handleLoanStatementMenu(String to, UserSession session) {
         if (loanStore.findByPhoneNumber(to).isEmpty()) {
-            return messageService.sendTextMessage(to, "You have no loan on record for a statement.")
+            return messageService.sendTextMessage(to, "You have no loan on record.")
                     .then(screenService.sendMainMenu(to));
         }
 
@@ -98,7 +98,7 @@ public Mono<Void> handleLoanClearanceMenu(String to, UserSession session) {
                     .then(screenService.sendMainMenu(to));
         }
         if (!"paid".equals(loanOpt.get().getStatus())) {
-            return messageService.sendTextMessage(to, "You have an outstanding loan balance. Pay Loan to download a Loan Clearance Letter.")
+            return messageService.sendTextMessage(to, "You have an outstanding loan balance. Pay Loan to download Loan Clearance Letter.")
                     .then(screenService.sendMainMenu(to));
         }
 
