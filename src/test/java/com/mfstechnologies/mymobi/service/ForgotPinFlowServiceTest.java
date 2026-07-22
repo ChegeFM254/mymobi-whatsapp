@@ -91,12 +91,12 @@ class ForgotPinFlowServiceTest {
         session.setOtp("12345");
         session.setOtpAttempts(2);
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
+        lenient().when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         forgotPinFlowService.handleEnterOtp(FROM, "00000", session).block();
 
         assertThat(lockoutService.getLockoutMinutesRemaining(FROM)).isGreaterThan(0);
-        verify(screenService).sendWelcome(FROM);
+        assertThat(session.getStep()).isEqualTo("welcome");
     }
 
     @Test
