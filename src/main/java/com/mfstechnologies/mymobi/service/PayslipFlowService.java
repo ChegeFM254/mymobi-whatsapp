@@ -75,28 +75,33 @@ public class PayslipFlowService {
                     .then(screenService.sendMainMenu(to));
         }
         RegisteredUser user = userOpt.get();
+        double cost = DOCUMENT_COST_PER_UNIT * months;
 
-        log.info("mpesa_stk_push_simulated to={} purpose=payslip months={}", to, months);
+        return messageService.sendTextMessage(to,
+                        String.format("You are about to pay KES %.2f to MyMobi account XXXXX. Please enter your Mpesa PIN.", cost))
+                .then(Mono.defer(() -> {
+                    log.info("mpesa_stk_push_simulated to={} purpose=payslip months={}", to, months);
 
-        String html = documentHtmlService.generatePayslipHtml(user, months);
+                    String html = documentHtmlService.generatePayslipHtml(user, months);
 
-        StoredDocument document = new StoredDocument();
-        document.setPhoneNumber(to);
-        document.setDocType("payslip");
-        document.setUpn(user.getUpn());
-        document.setHtml(html);
-        document.setCreatedAt(Instant.now());
+                    StoredDocument document = new StoredDocument();
+                    document.setPhoneNumber(to);
+                    document.setDocType("payslip");
+                    document.setUpn(user.getUpn());
+                    document.setHtml(html);
+                    document.setCreatedAt(Instant.now());
 
-        String token = CodeGenerator.generateDocumentToken();
-        documentStore.save(token, document);
+                    String token = CodeGenerator.generateDocumentToken();
+                    documentStore.save(token, document);
 
-        log.info("document_generated to={} docType=payslip token={}", to, token);
+                    log.info("document_generated to={} docType=payslip token={}", to, token);
 
-        clearPendingDocumentFields(session);
+                    clearPendingDocumentFields(session);
 
-        String link = properties.publicBaseUrl() + "/documents/" + token;
-        return messageService.sendTextMessage(to, "Your payslip is ready. View it securely here (you will be asked for your UPN):\n\n" + link)
-                .then(screenService.sendMainMenu(to));
+                    String link = properties.publicBaseUrl() + "/documents/" + token;
+                    return messageService.sendTextMessage(to, "Please click on this link to access your Payslip " + link)
+                            .then(screenService.sendMainMenu(to));
+                }));
     }
 
     public Mono<Void> handleCancelPayslip(String to, UserSession session) {
@@ -122,3 +127,4 @@ public class PayslipFlowService {
         }
     }
 }
+        
