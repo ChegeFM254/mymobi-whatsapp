@@ -1,5 +1,6 @@
 package com.mfstechnologies.mymobi.service;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -7,24 +8,18 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Temporary 10-minute login lockout after too many failed attempts —
- * direct equivalent of loginLockouts / applyLoginLockout() /
- * getLoginLockoutMinutesRemaining() from the Node.js version.
- *
- * Keyed by phone number rather than the user record, so a lockout still
- * applies even if the entered UPN never matched any local account —
- * otherwise repeatedly guessing a wrong UPN would never trigger it.
- */
 @Service
 public class LoginLockoutService {
 
     public static final int MAX_LOGIN_ATTEMPTS = 3;
-    private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(10);
 
+    private final Duration lockoutDuration;
     private final Map<String, Instant> lockouts = new ConcurrentHashMap<>();
 
-    /** @return minutes remaining on the lockout, or 0 if not currently locked out */
+    public LoginLockoutService(@Value("${app.login-lockout-duration-seconds:0}") long lockoutDurationSeconds) {
+        this.lockoutDuration = Duration.ofSeconds(lockoutDurationSeconds);
+    }
+
     public long getLockoutMinutesRemaining(String phoneNumber) {
         Instant unlockAt = lockouts.get(phoneNumber);
         if (unlockAt == null) {
@@ -37,11 +32,11 @@ public class LoginLockoutService {
             return 0;
         }
 
-        return ceilDivide(remainingSeconds, 60); // round UP to the next minute, matching Math.ceil() in the Node version
+        return ceilDivide(remainingSeconds, 60);
     }
 
     public void applyLockout(String phoneNumber) {
-        lockouts.put(phoneNumber, Instant.now().plus(LOCKOUT_DURATION));
+        lockouts.put(phoneNumber, Instant.now().plus(lockoutDuration));
     }
 
     private long ceilDivide(long value, long divisor) {
