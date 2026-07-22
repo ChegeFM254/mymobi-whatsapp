@@ -142,7 +142,7 @@ public class ConversationService {
             case "civil_servants" -> authFlowService.handleCivilServants(to, session);
             case "login_menu" -> authFlowService.handleLoginMenu(to, session);
             case "logout" -> authFlowService.handleLogout(to, session);
-            case "home" -> screenService.sendHomeScreen(to, session);
+            case "home" -> screenService.sendWelcome(to);
             case "back" -> loanApplicationFlowService.handleBack(to, session);
 
             case "buy_airtime" -> messageService.sendTextMessage(to, "You selected Buy Airtime. (Feature coming soon)");
