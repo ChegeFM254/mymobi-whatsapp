@@ -3,6 +3,7 @@ package com.mfstechnologies.mymobi.service;
 import com.mfstechnologies.mymobi.session.SessionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -27,6 +28,7 @@ public class InactivityTimeoutService {
     private final SessionStore sessionStore;
     private final WhatsAppMessageService messageService;
 
+    @Autowired
     public InactivityTimeoutService(SessionStore sessionStore, WhatsAppMessageService messageService) {
         this(sessionStore, messageService, java.time.Duration.ofSeconds(DEFAULT_INACTIVITY_TIMEOUT_SECONDS));
     }
