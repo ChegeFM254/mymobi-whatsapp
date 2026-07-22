@@ -42,6 +42,7 @@ public class ConversationService {
     private final LoanPaymentFlowService loanPaymentFlowService;
     private final PayslipFlowService payslipFlowService;
     private final LoanDocumentFlowService loanDocumentFlowService;
+    private final InactivityTimeoutService inactivityTimeoutService;
 
     public ConversationService(
             SessionStore sessionStore,
@@ -55,7 +56,8 @@ public class ConversationService {
             LoanApprovalFlowService loanApprovalFlowService,
             LoanPaymentFlowService loanPaymentFlowService,
             PayslipFlowService payslipFlowService,
-            LoanDocumentFlowService loanDocumentFlowService
+            LoanDocumentFlowService loanDocumentFlowService,
+            InactivityTimeoutService inactivityTimeoutService
     ) {
         this.sessionStore = sessionStore;
         this.screenService = screenService;
@@ -69,8 +71,8 @@ public class ConversationService {
         this.loanPaymentFlowService = loanPaymentFlowService;
         this.payslipFlowService = payslipFlowService;
         this.loanDocumentFlowService = loanDocumentFlowService;
+        this.inactivityTimeoutService = inactivityTimeoutService;
     }
-
     public Mono<Void> handleIncomingMessage(IncomingMessage message) {
         String from = message.from();
         if (from == null) {
@@ -81,6 +83,8 @@ public class ConversationService {
         messageService.resetSendTurn(from);
 
         UserSession session = sessionStore.getOrCreate(from);
+
+        inactivityTimeoutService.resetTimeout(from);
 
         if (isDebounced(session)) {
             log.info("debounced_duplicate_input from={}", from);
@@ -116,7 +120,6 @@ public class ConversationService {
         }
         return Duration.between(lastProcessed, Instant.now()).compareTo(DEBOUNCE) < 0;
     }
-
     private boolean isTriggerWord(String text) {
         String normalized = text.trim().toLowerCase();
         return TRIGGER_WORDS.contains(normalized) || normalized.contains(TRIGGER_SUBSTRING);
@@ -139,7 +142,7 @@ public class ConversationService {
             case "civil_servants" -> authFlowService.handleCivilServants(to, session);
             case "login_menu" -> authFlowService.handleLoginMenu(to, session);
             case "logout" -> authFlowService.handleLogout(to, session);
-            case "home" -> screenService.sendWelcome(to);
+            case "home" -> screenService.sendHomeScreen(to, session);
             case "back" -> loanApplicationFlowService.handleBack(to, session);
 
             case "buy_airtime" -> messageService.sendTextMessage(to, "Buy Airtime is coming soon. Thank you for your patience.");
@@ -187,7 +190,6 @@ public class ConversationService {
                     messageService.sendTextMessage(to, "You selected: " + buttonId + " (this flow is not ported yet, coming in a future update).");
         };
     }
-
     private Mono<Void> handleText(String to, String text, UserSession session) {
         log.info("text_received to={} step={}", to, session.getStep());
 
