@@ -63,7 +63,6 @@ public class ForgotPinFlowService {
         deliverOtpAfterDelay(to, otp);
         return messageService.sendTextMessage(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
     }
-
     public Mono<Void> handleEnterOtp(String to, String text, UserSession session) {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
             return messageService.sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
@@ -80,7 +79,8 @@ public class ForgotPinFlowService {
             lockoutService.applyLockout(to);
             resetFields(session);
             session.setStep("welcome");
-            return messageService.sendTextMessage(to, "Too many incorrect attempts. Your account has been temporarily locked for 10 minutes.");
+            return messageService.sendTextMessage(to, "Too many incorrect attempts. Your account has been temporarily locked for 10 minutes.")
+                    .then(screenService.sendWelcome(to));
         }
 
         int attemptsLeft = MAX_OTP_ATTEMPTS - session.getOtpAttempts();
@@ -99,7 +99,6 @@ public class ForgotPinFlowService {
         session.setStep("forgot_pin_confirm_new_pin");
         return messageService.sendTextMessage(to, "Please re-enter your new 5-digit PIN to confirm.");
     }
-
     public Mono<Void> handleConfirmNewPin(String to, String text, UserSession session) {
         if (!text.equals(session.getNewPin())) {
             session.setStep("forgot_pin_enter_new_pin");
@@ -124,7 +123,7 @@ public class ForgotPinFlowService {
 
         return messageService.sendTextMessage(to,
                         "Your PIN has been reset successfully.\n\n" +
-                                "Do not share this PIN with anyone."
+                        "Do not share this PIN with anyone."
                 )
                 .then(screenService.sendMainMenu(to));
     }
