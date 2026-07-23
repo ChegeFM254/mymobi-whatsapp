@@ -71,7 +71,7 @@ class ScreenMessageServiceTest {
         screenService.sendMainMenu(FROM).block();
 
         assertThat(capturedRowIds()).startsWith("apply_loan");
-    }
+        }
 
     @Test
     void showsApproveLoanAndCancelLoanTogetherWhenPendingApproval() {
@@ -95,6 +95,8 @@ class ScreenMessageServiceTest {
 
         assertThat(capturedRowIds()).startsWith("pay_loan_menu");
     }
+
+    @Test
     void showsApplyLoanWhenPreviousLoanIsFullyPaid() {
         Loan loan = new Loan();
         loan.setStatus("paid");
@@ -162,6 +164,7 @@ class ScreenMessageServiceTest {
                 "Confirm and Proceed:"
         );
     }
+
     @Test
     void loanBreakdownUsesSingularMonthForATenureOfOne() {
         var breakdown = new com.mfstechnologies.mymobi.model.LoanBreakdown(20000, 2000, 18000, 20000, 150);
@@ -214,5 +217,3 @@ class ScreenMessageServiceTest {
         assertThat(capturedBodyText()).doesNotContain("Pending Approval");
     }
 }
-
-    @Test
