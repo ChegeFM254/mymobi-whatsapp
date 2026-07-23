@@ -2,6 +2,16 @@ package com.mfstechnologies.mymobi.model;
 
 import java.time.Instant;
 
+/**
+ * Per-user conversation state - direct equivalent of the dynamically-typed
+ * session object in the Node.js version (userSessions[from]).
+ *
+ * NOTE: written with plain, manual getters/setters rather than Lombok's
+ * @Data annotation - Lombok's annotation processor was found to silently
+ * fail to generate any methods in one specific Docker build environment,
+ * so it was removed entirely to eliminate that as a variable, even
+ * though it worked correctly everywhere else this was tested.
+ */
 public class UserSession {
 
     private String step = "welcome";
@@ -14,7 +24,9 @@ public class UserSession {
     private String verificationCode;
 
     private String firstName;
+    private String middleName;
     private String lastName;
+    private String emailAddress;
     private String upn;
     private String nationalId;
     private String mobileNumber;
@@ -62,8 +74,14 @@ public class UserSession {
     public String getFirstName() { return firstName; }
     public void setFirstName(String firstName) { this.firstName = firstName; }
 
+    public String getMiddleName() { return middleName; }
+    public void setMiddleName(String middleName) { this.middleName = middleName; }
+
     public String getLastName() { return lastName; }
     public void setLastName(String lastName) { this.lastName = lastName; }
+
+    public String getEmailAddress() { return emailAddress; }
+    public void setEmailAddress(String emailAddress) { this.emailAddress = emailAddress; }
 
     public String getUpn() { return upn; }
     public void setUpn(String upn) { this.upn = upn; }
