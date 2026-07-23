@@ -1,8 +1,18 @@
 package com.mfstechnologies.mymobi.model;
 
+/**
+ * A registered account - equivalent of the object shape stored in
+ * registeredUsers[phoneNumber] in the Node.js version. hashedPin is
+ * exactly that: a BCrypt hash, never the raw PIN.
+ *
+ * Written with plain, manual getters/setters rather than Lombok - see
+ * the note in UserSession.java for why.
+ */
 public class RegisteredUser {
     private String firstName;
+    private String middleName;
     private String lastName;
+    private String emailAddress;
     private String upn;
     private String nationalId;
     private String mobileNumber;
@@ -16,8 +26,14 @@ public class RegisteredUser {
     public String getFirstName() { return firstName; }
     public void setFirstName(String firstName) { this.firstName = firstName; }
 
+    public String getMiddleName() { return middleName; }
+    public void setMiddleName(String middleName) { this.middleName = middleName; }
+
     public String getLastName() { return lastName; }
     public void setLastName(String lastName) { this.lastName = lastName; }
+
+    public String getEmailAddress() { return emailAddress; }
+    public void setEmailAddress(String emailAddress) { this.emailAddress = emailAddress; }
 
     public String getUpn() { return upn; }
     public void setUpn(String upn) { this.upn = upn; }
