@@ -135,7 +135,7 @@ public class AuthenticationFlowService {
                     session.setAuthenticated(false);
                     session.setStep("welcome");
                     session.setNewSession(true);
-                    messageService.sendTextMessage(to, "You have successfully logged out.")
+                    messageService.sendTextMessage(to, "You have successfully logged out. Please type 'Hi' to start a new session.")
                             .doOnError(err -> log.error("Failed to send logout confirmation to {}: {}", to, err.getMessage()))
                             .subscribe();
                 },
