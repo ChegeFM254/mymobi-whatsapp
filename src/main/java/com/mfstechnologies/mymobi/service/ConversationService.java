@@ -24,7 +24,8 @@ public class ConversationService {
     private static final Duration DEBOUNCE = Duration.ofMillis(800);
 
     private static final Set<String> EDIT_FIELD_IDS = Set.of(
-            "edit_firstname", "edit_lastname", "edit_upn", "edit_nationalid", "edit_mobilenumber"
+            "edit_firstname", "edit_middlename", "edit_lastname", "edit_mobilenumber",
+            "edit_emailaddress", "edit_upn", "edit_nationalid"
     );
 
     private static final Set<String> TENURE_IDS = Set.of("tenure_1", "tenure_2", "tenure_3");
@@ -206,7 +207,9 @@ public class ConversationService {
             case "login_enter_verification_code" -> authFlowService.handleLoginEnterVerificationCode(to, text, session);
 
             case "first_name" -> registrationFlowService.handleFirstName(to, text, session);
+            case "middle_name" -> registrationFlowService.handleMiddleName(to, text, session);
             case "last_name" -> registrationFlowService.handleLastName(to, text, session);
+            case "email_address" -> registrationFlowService.handleEmailAddress(to, text, session);
             case "upn" -> registrationFlowService.handleUpnField(to, text, session);
             case "national_id" -> registrationFlowService.handleNationalId(to, text, session);
             case "mobile_number" -> registrationFlowService.handleMobileNumber(to, text, session);
