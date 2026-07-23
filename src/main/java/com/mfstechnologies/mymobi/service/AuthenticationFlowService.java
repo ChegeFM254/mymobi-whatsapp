@@ -94,11 +94,12 @@ public class AuthenticationFlowService {
             return recordFailedAttemptAndRespond(to, session, "Incorrect code.");
         }
 
+        // UPN + PIN + Verification Code all correct.
         session.setLoginAttempts(0);
         session.setVerificationCode(null);
         session.setLoginUpn(null);
         session.setAuthenticated(true);
-        return screenService.sendMainMenu(to);
+        return screenService.sendWelcome(to);
     }
 
     private Mono<Void> recordFailedAttemptAndRespond(String to, UserSession session, String reasonPrefix) {
