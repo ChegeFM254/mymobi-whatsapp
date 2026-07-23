@@ -50,7 +50,7 @@ public class OptOutFlowService {
         }
 
         session.setStep("opt_out_confirmation");
-        return messageService.sendTextMessage(to, "You are about to OPT OUT of Emergency Loan Services.\n\nDo you want to proceed? (Yes/No)");
+        return messageService.sendTextMessage(to, "You are about to OPT OUT of Emergency Loan Services\n\nTo proceed, type YES or NO");
     }
 
     public Mono<Void> handleOptOutConfirmation(String to, String text, UserSession session) {
