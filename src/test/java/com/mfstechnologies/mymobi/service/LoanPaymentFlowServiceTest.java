@@ -78,12 +78,12 @@ class LoanPaymentFlowServiceTest {
     void selectingAValidInstallmentCountShowsConfirmation() {
         loanStore.save(FROM, approvedLoan(3, 0));
         UserSession session = new UserSession();
-        when(screenService.sendPayLoanConfirm(FROM, 2, 28884, 1)).thenReturn(Mono.empty());
+        when(screenService.sendPayLoanConfirm(FROM, 2, 28884, 14442, 1)).thenReturn(Mono.empty());
 
         paymentFlow.handlePayInstallmentsSelect(FROM, "pay_installments_2", session).block();
 
         assertThat(session.getPendingPaymentInstallments()).isEqualTo(2);
-        verify(screenService).sendPayLoanConfirm(FROM, 2, 28884, 1);
+        verify(screenService).sendPayLoanConfirm(FROM, 2, 28884, 14442, 1);
     }
 
     @Test
