@@ -56,13 +56,14 @@ class PayslipFlowServiceTest {
     }
 
     @Test
-    void invalidMonthsIsRejected() {
+    void payslipMenuShowsThePerMonthPriceUpfront() {
         UserSession session = new UserSession();
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        payslipFlow.handleEnterPayslipMonths(FROM, "15", session).block(); // over 12
+        payslipFlow.handlePayslipMenu(FROM, session).block();
 
-        assertThat(session.getPendingDocumentMonths()).isNull();
+        verify(messageService).sendTextMessage(eq(FROM),
+                eq("Payslip for each month costs KES 23.20. Enter the number of months (1-12):"));
     }
 
     @Test
