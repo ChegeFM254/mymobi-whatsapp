@@ -79,16 +79,21 @@ class RegistrationFlowServiceTest {
     }
 
     // ==================== KYC FIELD COLLECTION ====================
+    // Corrected order: First Name -> Middle Name -> Last Name -> Email
+    // Address -> UPN Number -> National ID Number -> Mpesa Mobile Number
+    // -> Confirmation. The five ORIGINAL fields keep their exact
+    // original relative order; only Middle Name and Email Address are
+    // newly inserted at specific points.
 
     @Test
-    void validFirstNameAdvancesToLastName() {
+    void validFirstNameAdvancesToMiddleName() {
         UserSession session = new UserSession();
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
         registrationFlowService.handleFirstName(FROM, "Jane", session).block();
 
         assertThat(session.getFirstName()).isEqualTo("Jane");
-        assertThat(session.getStep()).isEqualTo("last_name");
+        assertThat(session.getStep()).isEqualTo("middle_name");
     }
 
     @Test
@@ -100,6 +105,60 @@ class RegistrationFlowServiceTest {
 
         assertThat(session.getFirstName()).isNull();
         assertThat(session.getStep()).isEqualTo("welcome"); // unchanged
+    }
+
+    @Test
+    void validMiddleNameAdvancesToLastName() {
+        UserSession session = new UserSession();
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+
+        registrationFlowService.handleMiddleName(FROM, "Wanjiru", session).block();
+
+        assertThat(session.getMiddleName()).isEqualTo("Wanjiru");
+        assertThat(session.getStep()).isEqualTo("last_name");
+    }
+
+    @Test
+    void blankMiddleNameIsRejected() {
+        UserSession session = new UserSession();
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+
+        registrationFlowService.handleMiddleName(FROM, "", session).block();
+
+        assertThat(session.getMiddleName()).isNull();
+    }
+
+    @Test
+    void validLastNameAdvancesToEmailAddress() {
+        UserSession session = new UserSession();
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+
+        registrationFlowService.handleLastName(FROM, "Doe", session).block();
+
+        assertThat(session.getLastName()).isEqualTo("Doe");
+        assertThat(session.getStep()).isEqualTo("email_address");
+    }
+
+    @Test
+    void validEmailAddressAdvancesToUpn() {
+        UserSession session = new UserSession();
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+
+        registrationFlowService.handleEmailAddress(FROM, "jane.doe@example.com", session).block();
+
+        assertThat(session.getEmailAddress()).isEqualTo("jane.doe@example.com");
+        assertThat(session.getStep()).isEqualTo("upn");
+    }
+
+    @Test
+    void invalidEmailAddressIsRejected() {
+        UserSession session = new UserSession();
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+
+        registrationFlowService.handleEmailAddress(FROM, "not-an-email", session).block();
+
+        assertThat(session.getEmailAddress()).isNull();
+        verify(messageService).sendTextMessage(eq(FROM), contains("valid Email Address"));
     }
 
     @Test
@@ -132,6 +191,17 @@ class RegistrationFlowServiceTest {
         registrationFlowService.handleNationalId(FROM, "01234567", session).block(); // starts with 0
 
         assertThat(session.getNationalId()).isNull();
+    }
+
+    @Test
+    void validNationalIdAdvancesToMobileNumber() {
+        UserSession session = new UserSession();
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+
+        registrationFlowService.handleNationalId(FROM, "87654321", session).block();
+
+        assertThat(session.getNationalId()).isEqualTo("87654321");
+        assertThat(session.getStep()).isEqualTo("mobile_number");
     }
 
     @Test
@@ -176,7 +246,19 @@ class RegistrationFlowServiceTest {
         registrationFlowService.handleEditFieldSelect(FROM, "edit_nationalid", session).block();
 
         assertThat(session.getStep()).isEqualTo("edit_nationalid");
-        verify(messageService).sendTextMessage(FROM, "Enter new National ID:");
+        verify(messageService).sendTextMessage(FROM, "Enter new National ID Number:");
+    }
+
+    @Test
+    void editFieldSelectWorksForMiddleNameAndEmailAddressToo() {
+        UserSession session = new UserSession();
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+
+        registrationFlowService.handleEditFieldSelect(FROM, "edit_middlename", session).block();
+        verify(messageService).sendTextMessage(FROM, "Enter new Middle Name:");
+
+        registrationFlowService.handleEditFieldSelect(FROM, "edit_emailaddress", session).block();
+        verify(messageService).sendTextMessage(FROM, "Enter new Email Address:");
     }
 
     @Test
@@ -190,6 +272,40 @@ class RegistrationFlowServiceTest {
 
         assertThat(session.getFirstName()).isEqualTo("NewName");
         verify(screenService).sendConfirmation(FROM, session);
+    }
+
+    @Test
+    void editFieldTextUpdatesMiddleNameCorrectly() {
+        UserSession session = new UserSession();
+        session.setStep("edit_middlename");
+        when(screenService.sendConfirmation(eq(FROM), eq(session))).thenReturn(Mono.empty());
+
+        registrationFlowService.handleEditFieldText(FROM, "Kamau", session).block();
+
+        assertThat(session.getMiddleName()).isEqualTo("Kamau");
+    }
+
+    @Test
+    void editFieldTextUpdatesEmailAddressCorrectly() {
+        UserSession session = new UserSession();
+        session.setStep("edit_emailaddress");
+        when(screenService.sendConfirmation(eq(FROM), eq(session))).thenReturn(Mono.empty());
+
+        registrationFlowService.handleEditFieldText(FROM, "new@example.com", session).block();
+
+        assertThat(session.getEmailAddress()).isEqualTo("new@example.com");
+    }
+
+    @Test
+    void editFieldTextStillValidatesEmailFormat() {
+        UserSession session = new UserSession();
+        session.setStep("edit_emailaddress");
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+
+        registrationFlowService.handleEditFieldText(FROM, "not-an-email", session).block();
+
+        assertThat(session.getEmailAddress()).isNull();
+        verify(screenService, never()).sendConfirmation(anyString(), any());
     }
 
     @Test
@@ -283,7 +399,9 @@ class RegistrationFlowServiceTest {
     void matchingPinConfirmationCompletesRegistration() {
         UserSession session = new UserSession();
         session.setFirstName("Jane");
+        session.setMiddleName("Wanjiru");
         session.setLastName("Doe");
+        session.setEmailAddress("jane.doe@example.com");
         session.setUpn("12345");
         session.setNationalId("87654321");
         session.setMobileNumber("0722730336");
@@ -296,7 +414,15 @@ class RegistrationFlowServiceTest {
         assertThat(session.isAuthenticated()).isTrue();
         assertThat(session.getNewPin()).isNull(); // cleared after use
         assertThat(userStore.findByPhoneNumber(FROM)).isPresent();
-        assertThat(userStore.findByPhoneNumber(FROM).get().getFirstName()).isEqualTo("Jane");
+
+        RegisteredUser stored = userStore.findByPhoneNumber(FROM).get();
+        assertThat(stored.getFirstName()).isEqualTo("Jane");
+        assertThat(stored.getMiddleName()).isEqualTo("Wanjiru");
+        assertThat(stored.getLastName()).isEqualTo("Doe");
+        assertThat(stored.getEmailAddress()).isEqualTo("jane.doe@example.com");
+        assertThat(stored.getUpn()).isEqualTo("12345");
+        assertThat(stored.getNationalId()).isEqualTo("87654321");
+        assertThat(stored.getMobileNumber()).isEqualTo("0722730336");
         verify(screenService).sendMainMenu(FROM);
     }
 
