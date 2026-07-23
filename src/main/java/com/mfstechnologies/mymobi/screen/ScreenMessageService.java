@@ -561,7 +561,7 @@ public Mono<Void> sendPayLoanConfirm(String to, int installments, int totalAmoun
      * Loan Statement: cost confirmation before generating the document.
      */
     public Mono<Void> sendLoanStatementConfirm(String to, double cost) {
-        String body = String.format("Loan Statement: KES %.2f\n\nProceed?", cost);
+        String body = String.format("Loan Statement: You will be charged KES %.2f for this request.\n\nProceed:", cost);
 
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
@@ -587,7 +587,7 @@ public Mono<Void> sendPayLoanConfirm(String to, int installments, int totalAmoun
      * loan status is "paid".
      */
 public Mono<Void> sendLoanClearanceConfirm(String to, double cost) {
-        String body = String.format("Loan Clearance Letter: KES %.2f\n\nProceed?", cost);
+        String body = String.format("Loan Clearance Letter: You will be charged KES %.2f for this request.\n\nProceed:", cost);
 
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
