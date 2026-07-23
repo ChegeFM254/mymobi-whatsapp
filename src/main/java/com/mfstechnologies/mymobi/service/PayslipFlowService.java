@@ -48,7 +48,11 @@ public class PayslipFlowService {
 
     public Mono<Void> handlePayslipMenu(String to, UserSession session) {
         session.setStep("enter_payslip_months");
-        return messageService.sendTextMessage(to, "Enter the number of months to cover (1-12):");
+        String prompt = String.format(
+                "Payslip for each month costs KES %.2f. Enter the number of months (1-12):",
+                DOCUMENT_COST_PER_UNIT
+        );
+        return messageService.sendTextMessage(to, prompt);
     }
 
     public Mono<Void> handleEnterPayslipMonths(String to, String text, UserSession session) {
