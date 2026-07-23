@@ -62,7 +62,7 @@ public class LoanPaymentFlowService {
             return screenService.sendPayLoanOptions(to, remaining, monthlyInstallment);
         }
 
-        sesession.setPendingPaymentInstallments(selected);
+        session.setPendingPaymentInstallments(selected);
         int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() : 14442;
         int total = monthlyInstallment * selected;
         int remainingAfter = remaining - selected;
