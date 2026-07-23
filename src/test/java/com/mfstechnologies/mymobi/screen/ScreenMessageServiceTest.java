@@ -39,12 +39,14 @@ class ScreenMessageServiceTest {
     private ArgumentCaptor<Map<String, Object>> payloadCaptor;
 
     private LoanStore loanStore;
+    private com.mfstechnologies.mymobi.session.RegisteredUserStore userStore;
     private ScreenMessageService screenService;
 
     @BeforeEach
     void setUp() {
         loanStore = new LoanStore();
-        screenService = new ScreenMessageService(messageService, loanStore);
+        userStore = new com.mfstechnologies.mymobi.session.RegisteredUserStore();
+        screenService = new ScreenMessageService(messageService, loanStore, userStore);
         when(messageService.sendMessage(eq(FROM), payloadCaptor.capture())).thenReturn(Mono.empty());
     }
 
@@ -66,12 +68,19 @@ class ScreenMessageServiceTest {
         return (String) body.get("text");
     }
 
+    @SuppressWarnings("unchecked")
+    private String capturedHeaderText() {
+        Map<String, Object> payload = payloadCaptor.getValue();
+        Map<String, Object> interactive = (Map<String, Object>) payload.get("interactive");
+        Map<String, Object> header = (Map<String, Object>) interactive.get("header");
+        return (String) header.get("text");
+    }
     @Test
     void showsApplyLoanWhenThereIsNoLoan() {
         screenService.sendMainMenu(FROM).block();
 
         assertThat(capturedRowIds()).startsWith("apply_loan");
-        }
+    }
 
     @Test
     void showsApproveLoanAndCancelLoanTogetherWhenPendingApproval() {
@@ -137,7 +146,6 @@ class ScreenMessageServiceTest {
         // Welcome specifically has these rows; Main Menu does not.
         assertThat(capturedRowIds()).contains("civil_servants", "buy_airtime");
     }
-
     @Test
     void homeScreenShowsWelcomeWhenSessionIsNull() {
         screenService.sendHomeScreen(FROM, null).block();
@@ -201,7 +209,6 @@ class ScreenMessageServiceTest {
                 "Enter your Approval Code to proceed."
         );
     }
-
     @Test
     void approveLoanDetailsStatusIsGenuinelyDynamicNotHardcoded() {
         Loan loan = new Loan();
@@ -216,4 +223,25 @@ class ScreenMessageServiceTest {
         assertThat(capturedBodyText()).contains("Status: Cancelled");
         assertThat(capturedBodyText()).doesNotContain("Pending Approval");
     }
+
+    // ==================== sendWelcome personalization ====================
+
+    @Test
+    void welcomeGreetsByNameWhenARegisteredUserExists() {
+        var user = new com.mfstechnologies.mymobi.model.RegisteredUser();
+        user.setFirstName("John");
+        userStore.save(FROM, user);
+
+        screenService.sendWelcome(FROM).block();
+
+        assertThat(capturedHeaderText()).isEqualTo("Hello John, welcome to MyMobi [Java]");
+    }
+
+    @Test
+    void welcomeUsesGenericGreetingWhenNoRegisteredUserExists() {
+        screenService.sendWelcome(FROM).block();
+
+        assertThat(capturedHeaderText()).isEqualTo("Welcome to MyMobi [Java]");
+    }
 }
+    
