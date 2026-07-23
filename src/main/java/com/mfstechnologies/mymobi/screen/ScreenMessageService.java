@@ -231,14 +231,18 @@ public Mono<Void> sendOptIn(String to) {
                 Confirm Details:
 
                 First Name: %s
+                Middle Name: %s
                 Last Name: %s
-                UPN: %s
-                National ID: %s
-                Mobile Number (Mpesa): %s
+                Email Address: %s
+                UPN Number: %s
+                National ID Number: %s
+                Mpesa Mobile Number: %s
 
                 Is this correct?""",
                 nullToEmpty(session.getFirstName()),
+                nullToEmpty(session.getMiddleName()),
                 nullToEmpty(session.getLastName()),
+                nullToEmpty(session.getEmailAddress()),
                 nullToEmpty(session.getUpn()),
                 nullToEmpty(session.getNationalId()),
                 nullToEmpty(session.getMobileNumber())
