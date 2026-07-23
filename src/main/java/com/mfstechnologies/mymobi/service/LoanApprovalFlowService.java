@@ -98,7 +98,11 @@ public class LoanApprovalFlowService {
 
         log.info("loan_approved to={} refNo={}", to, loan.getRefNo());
 
-        return messageService.sendTextMessage(to, "Your loan approval has been received. Thank you for using MyMobi.")
+        String message = String.format(
+                "Your loan approval has been submitted. KES %,d will be sent to your M-Pesa account. Thank you for using MyMobi.",
+                loan.getBreakdown().disbursement()
+        );
+        return messageService.sendTextMessage(to, message)
                 .then(screenService.sendHomeScreen(to, session));
     }
 
