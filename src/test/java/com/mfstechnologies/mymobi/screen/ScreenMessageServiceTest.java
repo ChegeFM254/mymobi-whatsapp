@@ -21,6 +21,12 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * Covers the Main Menu's dynamic loan-action row - the old, separate
+ * "Emergency Loan" submenu was collapsed directly into this screen, so
+ * the correct Apply/Approve/Pay (plus Cancel Loan alongside Approve) row
+ * combination needs direct verification here.
+ */
 @ExtendWith(MockitoExtension.class)
 class ScreenMessageServiceTest {
 
@@ -52,6 +58,14 @@ class ScreenMessageServiceTest {
         return rows.stream().map(row -> (String) row.get("id")).toList();
     }
 
+    @SuppressWarnings("unchecked")
+    private String capturedBodyText() {
+        Map<String, Object> payload = payloadCaptor.getValue();
+        Map<String, Object> interactive = (Map<String, Object>) payload.get("interactive");
+        Map<String, Object> body = (Map<String, Object>) interactive.get("body");
+        return (String) body.get("text");
+    }
+
     @Test
     void showsApplyLoanWhenThereIsNoLoan() {
         screenService.sendMainMenu(FROM).block();
@@ -81,9 +95,7 @@ class ScreenMessageServiceTest {
 
         assertThat(capturedRowIds()).startsWith("pay_loan_menu");
     }
-
-    @Test
-  void showsApplyLoanWhenPreviousLoanIsFullyPaid() {
+    void showsApplyLoanWhenPreviousLoanIsFullyPaid() {
         Loan loan = new Loan();
         loan.setStatus("paid");
         loanStore.save(FROM, loan);
@@ -110,15 +122,17 @@ class ScreenMessageServiceTest {
 
         screenService.sendHomeScreen(FROM, session).block();
 
+        // Main Menu specifically has these rows; Welcome does not.
         assertThat(capturedRowIds()).contains("payslip_menu", "loan_statement_menu");
     }
 
     @Test
     void homeScreenShowsWelcomeWhenNotAuthenticated() {
-        com.mfstechnologies.mymobi.model.UserSession session = new com.mfstechnologies.mymobi.model.UserSession();
+        com.mfstechnologies.mymobi.model.UserSession session = new com.mfstechnologies.mymobi.model.UserSession(); // authenticated=false by default
 
         screenService.sendHomeScreen(FROM, session).block();
 
+        // Welcome specifically has these rows; Main Menu does not.
         assertThat(capturedRowIds()).contains("civil_servants", "buy_airtime");
     }
 
@@ -128,4 +142,77 @@ class ScreenMessageServiceTest {
 
         assertThat(capturedRowIds()).contains("civil_servants", "buy_airtime");
     }
+
+    // ==================== sendLoanBreakdown ====================
+
+    @Test
+    void loanBreakdownMatchesTheExactRequestedWording() {
+        var breakdown = new com.mfstechnologies.mymobi.model.LoanBreakdown(60000, 6842, 53158, 24500, 450);
+
+        screenService.sendLoanBreakdown(FROM, breakdown, 3).block();
+
+        assertThat(capturedBodyText()).isEqualTo(
+                "Loan Amount: KES 60,000\n" +
+                "Upfront Fees: KES 6,842\n" +
+                "You Receive: KES 53,158\n" +
+                "Loan Period: 3 Months\n" +
+                "Monthly Installment: KES 24,500\n" +
+                "Platform Fee: KES 450\n" +
+                "\n" +
+                "Confirm and Proceed:"
+        );
+    }
+    @Test
+    void loanBreakdownUsesSingularMonthForATenureOfOne() {
+        var breakdown = new com.mfstechnologies.mymobi.model.LoanBreakdown(20000, 2000, 18000, 20000, 150);
+
+        screenService.sendLoanBreakdown(FROM, breakdown, 1).block();
+
+        assertThat(capturedBodyText()).contains("Loan Period: 1 Month\n");
+        assertThat(capturedBodyText()).doesNotContain("1 Months");
+    }
+
+    // ==================== sendApproveLoanDetails ====================
+
+    @Test
+    void approveLoanDetailsMatchesTheExactRequestedWording() {
+        Loan loan = new Loan();
+        loan.setLoanAmount(60000);
+        loan.setTenureMonths(3);
+        loan.setDueDate("2026-10-23");
+        loan.setStatus("pending_approval");
+        loan.setBreakdown(new com.mfstechnologies.mymobi.model.LoanBreakdown(60000, 6842, 53158, 24500, 450));
+
+        screenService.sendApproveLoanDetails(FROM, loan).block();
+
+        assertThat(capturedBodyText()).isEqualTo(
+                "Loan Amount: KES 60,000\n" +
+                "Upfront Fees: KES 6,842\n" +
+                "You Receive: KES 53,158\n" +
+                "Loan Period: 3 Months\n" +
+                "Monthly Installment: KES 24,500\n" +
+                "Platform Fee: KES 450\n" +
+                "Due Date: 2026-10-23\n" +
+                "Status: Pending Approval\n" +
+                "\n" +
+                "Enter your Approval Code to proceed."
+        );
+    }
+
+    @Test
+    void approveLoanDetailsStatusIsGenuinelyDynamicNotHardcoded() {
+        Loan loan = new Loan();
+        loan.setLoanAmount(20000);
+        loan.setTenureMonths(1);
+        loan.setDueDate("2026-09-01");
+        loan.setStatus("cancelled"); // deliberately NOT pending_approval
+        loan.setBreakdown(new com.mfstechnologies.mymobi.model.LoanBreakdown(20000, 2000, 18000, 20000, 150));
+
+        screenService.sendApproveLoanDetails(FROM, loan).block();
+
+        assertThat(capturedBodyText()).contains("Status: Cancelled");
+        assertThat(capturedBodyText()).doesNotContain("Pending Approval");
+    }
 }
+
+    @Test
