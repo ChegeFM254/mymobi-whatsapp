@@ -354,12 +354,15 @@ public Mono<Void> sendEditOptions(String to) {
      * Apply Loan: fee breakdown and Accept/Decline. Direct equivalent of
      * sendLoanBreakdown() in the Node.js version.
      */
-public Mono<Void> sendLoanBreakdown(String to, com.mfstechnologies.mymobi.model.LoanBreakdown breakdown) {
+public Mono<Void> sendLoanBreakdown(String to, com.mfstechnologies.mymobi.model.LoanBreakdown breakdown, int tenureMonths) {
+        String periodLabel = tenureMonths > 1 ? "Months" : "Month";
         String details = String.format(
-                "Loan %,d\nUpfront Fees %,d\nDisbursement %,d\nMonthly Installment %,d\nPlatform Fee %,d",
+                "Loan Amount: KES %,d\nUpfront Fees: KES %,d\nYou Receive: KES %,d\nLoan Period: %d %s\nMonthly Installment: KES %,d\nPlatform Fee: KES %,d\n\nConfirm and Proceed:",
                 breakdown.loanAmount(),
                 breakdown.upfrontFee(),
                 breakdown.disbursement(),
+                tenureMonths,
+                periodLabel,
                 breakdown.monthlyInstallment(),
                 breakdown.platformFee()
         );
@@ -397,12 +400,19 @@ public Mono<Void> sendLoanBreakdown(String to, com.mfstechnologies.mymobi.model.
      * Node.js version's Approve Loan flow.
      */
     public Mono<Void> sendApproveLoanDetails(String to, com.mfstechnologies.mymobi.model.Loan loan) {
+        String periodLabel = loan.getTenureMonths() > 1 ? "Months" : "Month";
+        com.mfstechnologies.mymobi.model.LoanBreakdown breakdown = loan.getBreakdown();
         String details = String.format(
-                "Loan Amount: KES %,d\nTenure: %d month(s)\nDue Date: %s\nStatus: %s\n\nEnter your Approval Code to proceed.",
+               "Loan Amount: KES %,d\nUpfront Fees: KES %,d\nYou Receive: KES %,d\nLoan Period: %d %s\nMonthly Installment: KES %,d\nPlatform Fee: KES %,d\nDue Date: %s\nStatus: %s\n\nEnter your Approval Code to proceed.",
                 loan.getLoanAmount(),
+                breakdown.upfrontFee(),
+                breakdown.disbursement(),
                 loan.getTenureMonths(),
+                periodLabel,
+                breakdown.monthlyInstallment(),
+                breakdown.platformFee(),
                 loan.getDueDate(),
-                loan.getStatus()
+                humanizeStatus(loan.getStatus())
         );
 
         Map<String, Object> payload = Map.of(
@@ -599,5 +609,18 @@ public Mono<Void> sendLoanClearanceConfirm(String to, double cost) {
 
     private String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private String humanizeStatus(String rawStatus) {
+        if (rawStatus == null) {
+            return "";
+        }
+        return switch (rawStatus) {
+            case "pending_approval" -> "Pending Approval";
+            case "approved" -> "Current (Active)";
+            case "paid" -> "Paid";
+            case "cancelled" -> "Cancelled";
+            default -> rawStatus;
+        };
     }
 }
