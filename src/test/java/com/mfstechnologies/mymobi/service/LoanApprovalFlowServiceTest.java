@@ -1,5 +1,6 @@
 package com.mfstechnologies.mymobi.service;
 
+import com.mfstechnologies.mymobi.model.LoanBreakdown;
 import com.mfstechnologies.mymobi.model.Loan;
 import com.mfstechnologies.mymobi.model.RegisteredUser;
 import com.mfstechnologies.mymobi.model.UserSession;
@@ -46,6 +47,7 @@ class LoanApprovalFlowServiceTest {
         loan.setApprovalCode("654321");
         loan.setStatus("pending_approval");
         loan.setDueDate("2026-08-19");
+        loan.setBreakdown(new LoanBreakdown(15000, 2943, 32057, 14442, 150));
         return loan;
     }
 
