@@ -19,7 +19,7 @@ public class InactivityTimeoutService {
 
     private static final Logger log = LoggerFactory.getLogger(InactivityTimeoutService.class);
     private static final long DEFAULT_INACTIVITY_TIMEOUT_SECONDS = 60;
-    private static final String TIMEOUT_MESSAGE = "\u23F0 Your session has timed out due to inactivity.";
+    private static final String TIMEOUT_MESSAGE = "Your session has ended due to a period of inactivity. Please type 'Hi' to start a new session.";
 
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final Map<String, ScheduledFuture<?>> pendingTimeouts = new ConcurrentHashMap<>();
