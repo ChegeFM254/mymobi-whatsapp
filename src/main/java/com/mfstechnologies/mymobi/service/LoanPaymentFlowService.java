@@ -62,12 +62,13 @@ public class LoanPaymentFlowService {
             return screenService.sendPayLoanOptions(to, remaining, monthlyInstallment);
         }
 
-        session.setPendingPaymentInstallments(selected);
+        sesession.setPendingPaymentInstallments(selected);
         int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() : 14442;
         int total = monthlyInstallment * selected;
         int remainingAfter = remaining - selected;
+        int remainingBalanceAfter = monthlyInstallment * remainingAfter;
 
-        return screenService.sendPayLoanConfirm(to, selected, total, remainingAfter);
+        return screenService.sendPayLoanConfirm(to, selected, total, remainingBalanceAfter, remainingAfter);
     }
     public Mono<Void> handleConfirmPayLoan(String to, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
