@@ -234,7 +234,7 @@ class ScreenMessageServiceTest {
 
         screenService.sendWelcome(FROM).block();
 
-        assertThat(capturedHeaderText()).isEqualTo("Hello John, welcome to MyMobi [Java]");
+        assertThat(capturedHeaderText()).isEqualTo("Hello John, Welcome to MyMobi [Java]");
     }
 
     @Test
