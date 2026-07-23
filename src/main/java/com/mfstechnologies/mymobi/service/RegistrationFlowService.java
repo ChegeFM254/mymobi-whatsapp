@@ -17,12 +17,20 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The full Registration/KYC flow — OptIn, Terms, 5 KYC fields (with
+ * The full Registration/KYC flow - OptIn, Terms, 7 KYC fields (with
  * Confirm/Edit), OTP verification, and new PIN setup. Direct equivalent
  * of the corresponding sections of handleButton() / handleTextInput()
- * in the Node.js version.
+ * in the Node.js version, extended with Middle Name and Email Address -
+ * two fields Node never had.
  *
- * This is the largest single flow in the whole application — deliberately
+ * KYC collection order (per product decision): the ORIGINAL five fields
+ * keep their original relative order exactly as before (First Name,
+ * Last Name, UPN Number, National ID Number, Mpesa Mobile Number) - the
+ * two new fields are inserted at specific points, nothing else moved:
+ * First Name, Middle Name, Last Name, Email Address, UPN Number,
+ * National ID Number, Mpesa Mobile Number.
+ *
+ * This is the largest single flow in the whole application - deliberately
  * given its own dedicated session, following the same incremental,
  * one-flow-at-a-time approach used throughout this rewrite.
  */
@@ -34,10 +42,12 @@ public class RegistrationFlowService {
 
     private static final Map<String, String> EDIT_FIELD_LABELS = Map.of(
             "edit_firstname", "First Name",
+            "edit_middlename", "Middle Name",
             "edit_lastname", "Last Name",
-            "edit_upn", "UPN",
-            "edit_nationalid", "National ID",
-            "edit_mobilenumber", "Mobile Number (Mpesa)"
+            "edit_emailaddress", "Email Address",
+            "edit_upn", "UPN Number",
+            "edit_nationalid", "National ID Number",
+            "edit_mobilenumber", "Mpesa Mobile Number"
     );
 
     private final ScreenMessageService screenService;
@@ -84,7 +94,7 @@ public class RegistrationFlowService {
 
     public Mono<Void> handleAcceptTerms(String to, UserSession session) {
         session.setStep("first_name");
-        return messageService.sendTextMessage(to, "Enter your First Name");
+        return messageService.sendTextMessage(to, "Enter First Name");
     }
 
     public Mono<Void> handleDeclineTerms(String to, UserSession session) {
@@ -92,14 +102,27 @@ public class RegistrationFlowService {
     }
 
     // ==================== KYC FIELD COLLECTION ====================
+    // Order: First Name -> Middle Name -> Last Name -> Email Address ->
+    // UPN Number -> National ID Number -> Mpesa Mobile Number -> Confirmation.
+    // The five original fields keep their exact original relative order;
+    // only Middle Name and Email Address are newly inserted.
 
     public Mono<Void> handleFirstName(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
             return messageService.sendTextMessage(to, "Please enter your First Name.");
         }
         session.setFirstName(text);
+        session.setStep("middle_name");
+        return messageService.sendTextMessage(to, "Enter Middle Name");
+    }
+
+    public Mono<Void> handleMiddleName(String to, String text, UserSession session) {
+        if (text == null || text.isBlank()) {
+            return messageService.sendTextMessage(to, "Please enter your Middle Name.");
+        }
+        session.setMiddleName(text);
         session.setStep("last_name");
-        return messageService.sendTextMessage(to, "Enter your Last Name");
+        return messageService.sendTextMessage(to, "Enter Last Name");
     }
 
     public Mono<Void> handleLastName(String to, String text, UserSession session) {
@@ -107,8 +130,20 @@ public class RegistrationFlowService {
             return messageService.sendTextMessage(to, "Please enter your Last Name.");
         }
         session.setLastName(text);
+        session.setStep("email_address");
+        return messageService.sendTextMessage(to, "Enter Email Address");
+    }
+
+    public Mono<Void> handleEmailAddress(String to, String text, UserSession session) {
+        if (text == null || text.isBlank()) {
+            return messageService.sendTextMessage(to, "Please enter your Email Address.");
+        }
+        if (!FieldValidators.isValidEmail(text)) {
+            return messageService.sendTextMessage(to, "Please enter a valid Email Address (e.g. name@example.com).");
+        }
+        session.setEmailAddress(text);
         session.setStep("upn");
-        return messageService.sendTextMessage(to, "Enter UPN");
+        return messageService.sendTextMessage(to, "Enter UPN Number");
     }
 
     public Mono<Void> handleUpnField(String to, String text, UserSession session) {
@@ -132,12 +167,11 @@ public class RegistrationFlowService {
         }
         session.setNationalId(text);
         session.setStep("mobile_number");
-        return messageService.sendTextMessage(to, "Enter your M-Pesa Mobile Number");
+        return messageService.sendTextMessage(to, "Enter Mpesa Mobile Number");
     }
-
     public Mono<Void> handleMobileNumber(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-            return messageService.sendTextMessage(to, "Enter your M-Pesa Mobile Number");
+            return messageService.sendTextMessage(to, "Please enter your Mobile Number (Mpesa).");
         }
         if (!FieldValidators.isValidMobileNumber(text)) {
             return messageService.sendTextMessage(to,
@@ -172,7 +206,6 @@ public class RegistrationFlowService {
         String label = EDIT_FIELD_LABELS.getOrDefault(fieldId, "field");
         return messageService.sendTextMessage(to, "Enter new " + label + ":");
     }
-
     public Mono<Void> handleEditFieldText(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
             return messageService.sendTextMessage(to, "Please enter a valid value.");
@@ -190,10 +223,15 @@ public class RegistrationFlowService {
             return messageService.sendTextMessage(to,
                     "Mobile Number should be 10 digits starting with 0 (e.g. 0722730336) or 12 digits starting with 254 (e.g. 254722730336). Please try again.");
         }
+        if ("edit_emailaddress".equals(step) && !FieldValidators.isValidEmail(text)) {
+            return messageService.sendTextMessage(to, "Please enter a valid Email Address (e.g. name@example.com).");
+        }
 
         switch (step) {
             case "edit_firstname" -> session.setFirstName(text);
+            case "edit_middlename" -> session.setMiddleName(text);
             case "edit_lastname" -> session.setLastName(text);
+            case "edit_emailaddress" -> session.setEmailAddress(text);
             case "edit_upn" -> session.setUpn(text);
             case "edit_nationalid" -> session.setNationalId(text);
             case "edit_mobilenumber" -> session.setMobileNumber(text);
@@ -229,8 +267,7 @@ public class RegistrationFlowService {
     }
 
     // ==================== NEW PIN SETUP ====================
-
-    public Mono<Void> handleEnterNewPin(String to, String text, UserSession session) {
+public Mono<Void> handleEnterNewPin(String to, String text, UserSession session) {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
             return messageService.sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
         }
@@ -255,7 +292,9 @@ public class RegistrationFlowService {
     private Mono<Void> completeRegistration(String to, UserSession session) {
         RegisteredUser user = new RegisteredUser();
         user.setFirstName(session.getFirstName());
+        user.setMiddleName(session.getMiddleName());
         user.setLastName(session.getLastName());
+        user.setEmailAddress(session.getEmailAddress());
         user.setUpn(session.getUpn());
         user.setNationalId(session.getNationalId());
         user.setMobileNumber(session.getMobileNumber());
@@ -269,12 +308,12 @@ public class RegistrationFlowService {
         session.setAuthenticated(true);
 
         return messageService.sendTextMessage(to,
-                        "🎉 Registration Complete!\n\n" +
-                                "Your account has been successfully set up.\n\n" +
-                                "🔒 Security Notice:\n" +
-                                "• Your PIN is now active\n" +
-                                "• Do not share this PIN with anyone\n" +
-                                "• For your protection, we strongly recommend deleting this chat or the messages containing your PIN"
+                        "\uD83C\uDF89 Registration Complete!\n\n" +
+                        "Your account has been successfully set up.\n\n" +
+                        "\uD83D\uDD12 Security Notice:\n" +
+                        "\u2022 Your PIN is now active\n" +
+                        "\u2022 Do not share this PIN with anyone\n" +
+                        "\u2022 For your protection, we strongly recommend deleting this chat or the messages containing your PIN"
                 )
                 .then(screenService.sendMainMenu(to));
     }
@@ -287,7 +326,7 @@ public class RegistrationFlowService {
 
     /**
      * Simulates SMS delivery of the OTP, arriving as a separate WhatsApp
-     * message a few seconds later — same testing pattern used for the
+     * message a few seconds later - same testing pattern used for the
      * Verification Code in AuthenticationFlowService. TODO: remove once
      * a real SMS/backend delivers this for real.
      */
