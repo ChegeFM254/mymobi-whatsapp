@@ -20,8 +20,9 @@ public final class FieldValidators {
     // 10 digits starting with 0 (e.g. 0722730336), or 12 digits starting with 254 (e.g. 254722730336).
     private static final Pattern MOBILE_NUMBER_PATTERN = Pattern.compile("^(0\\d{9}|254\\d{9})$");
 
-    // Standard, reasonably strict email shape: something@something.tld
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[\\w.+-]+@[\\w-]+\\.[a-zA-Z]{2,}$");
+    // Standard, reasonably strict email shape: something@something.tld,
+    // allowing multi-part domains like mymobi.co.ke.
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[\\w.+-]+@[\\w-]+(\\.[\\w-]+)*\\.[a-zA-Z]{2,}$");
 
     private FieldValidators() {
     }
