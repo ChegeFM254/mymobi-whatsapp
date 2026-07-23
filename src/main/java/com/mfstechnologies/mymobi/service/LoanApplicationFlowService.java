@@ -177,7 +177,7 @@ public class LoanApplicationFlowService {
 
         deliverApprovalCodeAfterDelay(to, approvalCode, refNo);
 
-        return messageService.sendTextMessage(to, "Your loan request has been submitted. Please wait for an SMS from MyMobi.");
+        return messageService.sendTextMessage(to, "Your loan request has been submitted. Please wait for the approval code SMS from MyMobi.");
     }
 
     /**
