@@ -109,7 +109,7 @@ public class LoanApplicationFlowService {
         session.setCurrentMenu("loan_breakdown_menu");
 
         LoanBreakdown breakdown = calculationService.calculateBreakdown(amount, session.getLoanTenureMonths());
-        return screenService.sendLoanBreakdown(to, breakdown);
+        return screenService.sendLoanBreakdown(to, breakdown, session.getLoanTenureMonths());
     }
 
     // ==================== BREAKDOWN: ACCEPT / DECLINE ====================
