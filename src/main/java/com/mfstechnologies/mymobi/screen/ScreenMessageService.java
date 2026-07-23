@@ -60,8 +60,8 @@ public class ScreenMessageService {
      */
     public Mono<Void> sendWelcome(String to) {
         String greeting = userStore.findByPhoneNumber(to)
-                .map(user -> "Hello " + user.getFirstName() + ", welcome to MyMobi [Java]")
-                .orElse("Welcome to MyMobi [Java]");
+                .map(user -> "Hello " + user.getFirstName() + ", Welcome to MyMobi [Java]")
+                .orElse("welcome to MyMobi [Java]");
 
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
