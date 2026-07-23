@@ -59,13 +59,17 @@ public class ScreenMessageService {
      * Node.js version, including the Log Out option added there later.
      */
     public Mono<Void> sendWelcome(String to) {
+        String greeting = userStore.findByPhoneNumber(to)
+                .map(user -> "Hello " + user.getFirstName() + ", welcome to MyMobi [Java]")
+                .orElse("Welcome to MyMobi [Java]");
+
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
                 "to", to,
                 "type", "interactive",
                 "interactive", Map.of(
                         "type", "list",
-                        "header", Map.of("type", "text", "text", "Welcome to MyMobi [Java]"),
+                        "header", Map.of("type", "text", "text", greeting),
                         "body", Map.of("text", "Select a service"),
                         "footer", Map.of("text", "MyMobi Emergency Loan"),
                         "action", Map.of(
