@@ -209,6 +209,7 @@ class ScreenMessageServiceTest {
                 "Enter your Approval Code to proceed."
         );
     }
+
     @Test
     void approveLoanDetailsStatusIsGenuinelyDynamicNotHardcoded() {
         Loan loan = new Loan();
@@ -223,7 +224,7 @@ class ScreenMessageServiceTest {
         assertThat(capturedBodyText()).contains("Status: Cancelled");
         assertThat(capturedBodyText()).doesNotContain("Pending Approval");
     }
-
+    
     // ==================== sendWelcome personalization ====================
 
     @Test
@@ -243,5 +244,59 @@ class ScreenMessageServiceTest {
 
         assertThat(capturedHeaderText()).isEqualTo("Welcome to MyMobi [Java]");
     }
+
+    // ==================== sendConfirmation ====================
+
+    @Test
+    void confirmationShowsAllSevenKycFieldsInTheCorrectOrder() {
+        com.mfstechnologies.mymobi.model.UserSession session = new com.mfstechnologies.mymobi.model.UserSession();
+        session.setFirstName("Jane");
+        session.setMiddleName("Wanjiru");
+        session.setLastName("Doe");
+        session.setEmailAddress("jane.doe@example.com");
+        session.setUpn("12345");
+        session.setNationalId("87654321");
+        session.setMobileNumber("0722730336");
+
+        screenService.sendConfirmation(FROM, session).block();
+
+        String body = capturedBodyText();
+        assertThat(body).contains("First Name: Jane");
+        assertThat(body).contains("Middle Name: Wanjiru");
+        assertThat(body).contains("Last Name: Doe");
+        assertThat(body).contains("Email Address: jane.doe@example.com");
+        assertThat(body).contains("UPN Number: 12345");
+        assertThat(body).contains("National ID Number: 87654321");
+        assertThat(body).contains("Mpesa Mobile Number: 0722730336");
+
+        // Order matters too - the five ORIGINAL fields keep their exact
+        // original relative order; Middle Name and Email Address are
+        // just inserted at specific points, nothing else moved.
+        int firstNameIndex = body.indexOf("First Name:");
+        int middleNameIndex = body.indexOf("Middle Name:");
+        int lastNameIndex = body.indexOf("Last Name:");
+        int emailIndex = body.indexOf("Email Address:");
+        int upnIndex = body.indexOf("UPN Number:");
+        int nationalIdIndex = body.indexOf("National ID Number:");
+        int mobileIndex = body.indexOf("Mpesa Mobile Number:");
+        assertThat(firstNameIndex).isLessThan(middleNameIndex);
+        assertThat(middleNameIndex).isLessThan(lastNameIndex);
+        assertThat(lastNameIndex).isLessThan(emailIndex);
+        assertThat(emailIndex).isLessThan(upnIndex);
+        assertThat(upnIndex).isLessThan(nationalIdIndex);
+        assertThat(nationalIdIndex).isLessThan(mobileIndex);
+    }
+
+    // ==================== sendEditOptions ====================
+
+    @Test
+    void editOptionsIncludesAllSevenFieldsPlusExit() {
+        screenService.sendEditOptions(FROM).block();
+
+        assertThat(capturedRowIds()).containsExactly(
+                "edit_firstname", "edit_middlename", "edit_lastname",
+                "edit_emailaddress", "edit_upn", "edit_nationalid", "edit_mobilenumber",
+                "exit_edit"
+        );
+    }
 }
-    
