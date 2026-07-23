@@ -92,7 +92,7 @@ public Mono<Void> sendCivilServantsMenu(String to) {
                 "interactive", Map.of(
                         "type", "list",
                         "header", Map.of("type", "text", "text", "Civil Servants"),
-                        "body", Map.of("text", "Select a service:"),
+                        "body", Map.of("text", "Log in or register to access MyMobi services."),
                         "footer", Map.of("text", "MyMobi"),
                         "action", Map.of(
                                 "button", "Select Option",
