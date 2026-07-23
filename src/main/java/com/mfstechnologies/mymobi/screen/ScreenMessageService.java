@@ -26,10 +26,16 @@ public class ScreenMessageService {
 
     private final WhatsAppMessageService messageService;
     private final com.mfstechnologies.mymobi.session.LoanStore loanStore;
+    private final com.mfstechnologies.mymobi.session.RegisteredUserStore userStore;
 
-    public ScreenMessageService(WhatsAppMessageService messageService, com.mfstechnologies.mymobi.session.LoanStore loanStore) {
+    public ScreenMessageService(
+            WhatsAppMessageService messageService,
+            com.mfstechnologies.mymobi.session.LoanStore loanStore,
+            com.mfstechnologies.mymobi.session.RegisteredUserStore userStore
+    ) {
         this.messageService = messageService;
         this.loanStore = loanStore;
+        this.userStore = userStore;
     }
 
     /**
