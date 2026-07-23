@@ -132,7 +132,7 @@ public class RegistrationFlowService {
         }
         session.setNationalId(text);
         session.setStep("mobile_number");
-        return messageService.sendTextMessage(to, "Enter Mobile Number (Mpesa)");
+        return messageService.sendTextMessage(to, "Enter your M-Pesa Mobile Number");
     }
 
     public Mono<Void> handleMobileNumber(String to, String text, UserSession session) {
