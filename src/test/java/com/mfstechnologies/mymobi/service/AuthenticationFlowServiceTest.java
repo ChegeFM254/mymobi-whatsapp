@@ -174,17 +174,17 @@ class AuthenticationFlowServiceTest {
         verify(screenService).sendHomeScreen(FROM, session);
     }
     @Test
-    void correctVerificationCodeCompletesLoginAndShowsMainMenu() {
+    void correctVerificationCodeCompletesLoginAndShowsWelcomeScreen() {
         UserSession session = new UserSession();
         session.setStep("login_enter_verification_code");
         session.setVerificationCode("98765");
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
+        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         authFlowService.handleLoginEnterVerificationCode(FROM, "98765", session).block();
 
         assertThat(session.isAuthenticated()).isTrue();
-        assertThat(session.getVerificationCode()).isNull();
-        verify(screenService).sendMainMenu(FROM);
+        assertThat(session.getVerificationCode()).isNull(); // cleared after use
+        verify(screenService).sendWelcome(FROM);
     }
 
     @Test
