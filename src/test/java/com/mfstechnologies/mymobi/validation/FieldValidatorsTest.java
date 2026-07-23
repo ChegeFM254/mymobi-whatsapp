@@ -59,4 +59,25 @@ class FieldValidatorsTest {
         assertThat(FieldValidators.isValidFiveDigitCode("123456")).isFalse();
         assertThat(FieldValidators.isValidFiveDigitCode("abcde")).isFalse();
     }
+
+    @Test
+    void validEmailAddressesAreAccepted() {
+        assertThat(FieldValidators.isValidEmail("jane.doe@example.com")).isTrue();
+        assertThat(FieldValidators.isValidEmail("john_kamau123@mymobi.co.ke")).isTrue();
+        assertThat(FieldValidators.isValidEmail("a+tag@sub.domain.org")).isTrue();
+    }
+
+    @Test
+    void emailAddressesMissingAnAtSignOrDomainAreRejected() {
+        assertThat(FieldValidators.isValidEmail("not-an-email")).isFalse();
+        assertThat(FieldValidators.isValidEmail("missing@domain")).isFalse(); // no TLD
+        assertThat(FieldValidators.isValidEmail("@example.com")).isFalse();   // no local part
+        assertThat(FieldValidators.isValidEmail("name@")).isFalse();          // no domain
+    }
+
+    @Test
+    void nullOrEmptyEmailIsRejected() {
+        assertThat(FieldValidators.isValidEmail(null)).isFalse();
+        assertThat(FieldValidators.isValidEmail("")).isFalse();
+    }
 }
