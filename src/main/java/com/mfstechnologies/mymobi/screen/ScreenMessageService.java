@@ -507,10 +507,10 @@ public Mono<Void> sendCancelLoanConfirm(String to) {
      * equivalent of the pay-loan confirmation screen in the Node.js
      * version.
      */
-public Mono<Void> sendPayLoanConfirm(String to, int installments, int totalAmount, int remainingBalanceAfter) {
+public Mono<Void> sendPayLoanConfirm(String to, int installments, int totalAmount, int remainingBalanceAfter, int remainingInstallmentsAfter) {
         String body = String.format(
-                "You are about to pay %d installment(s) totaling KES %,d.\n\nRemaining balance after this payment: %d installment(s).\n\nProceed?",
-                installments, totalAmount, remainingBalanceAfter
+                "You are about to pay %d installment(s) totalling KES %,d.\n\nRemaining balance after this payment: KES %,d (%d installments).\nProceed?",
+                installments, totalAmount, remainingBalanceAfter, remainingInstallmentsAfter
         );
 
         Map<String, Object> payload = Map.of(
