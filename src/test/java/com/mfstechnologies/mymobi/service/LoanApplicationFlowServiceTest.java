@@ -124,7 +124,7 @@ class LoanApplicationFlowServiceTest {
         UserSession session = new UserSession();
         session.setLoanLimit(20000);
         session.setLoanTenureMonths(1);
-        when(screenService.sendLoanBreakdown(eq(FROM), any())).thenReturn(Mono.empty());
+        when(screenService.sendLoanBreakdown(eq(FROM), any(), eq(1))).thenReturn(Mono.empty());
 
         loanFlow.handleEnterLoanAmount(FROM, "15000", session).block();
 
