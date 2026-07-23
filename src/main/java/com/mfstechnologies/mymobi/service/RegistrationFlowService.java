@@ -137,7 +137,7 @@ public class RegistrationFlowService {
 
     public Mono<Void> handleMobileNumber(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-            return messageService.sendTextMessage(to, "Please enter your Mobile Number (Mpesa).");
+            return messageService.sendTextMessage(to, "Enter your M-Pesa Mobile Number");
         }
         if (!FieldValidators.isValidMobileNumber(text)) {
             return messageService.sendTextMessage(to,
