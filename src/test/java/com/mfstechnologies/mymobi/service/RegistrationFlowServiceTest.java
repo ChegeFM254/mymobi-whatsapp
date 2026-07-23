@@ -407,7 +407,7 @@ class RegistrationFlowServiceTest {
         session.setMobileNumber("0722730336");
         session.setNewPin("99999");
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
+        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         registrationFlowService.handleConfirmNewPin(FROM, "99999", session).block();
 
@@ -423,7 +423,7 @@ class RegistrationFlowServiceTest {
         assertThat(stored.getUpn()).isEqualTo("12345");
         assertThat(stored.getNationalId()).isEqualTo("87654321");
         assertThat(stored.getMobileNumber()).isEqualTo("0722730336");
-        verify(screenService).sendMainMenu(FROM);
+        verify(screenService).sendWelcome(FROM);
     }
 
     @Test
@@ -431,7 +431,7 @@ class RegistrationFlowServiceTest {
         UserSession session = new UserSession();
         session.setNewPin("99999");
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
+        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         registrationFlowService.handleConfirmNewPin(FROM, "99999", session).block();
 
