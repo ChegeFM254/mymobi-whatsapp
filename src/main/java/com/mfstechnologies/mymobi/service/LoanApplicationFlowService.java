@@ -182,8 +182,10 @@ public class LoanApplicationFlowService {
 
     /**
      * Simulates SMS delivery of the approval code, arriving as a
-     * separate WhatsApp message a few seconds later, followed by the
-     * Main Menu (now showing Approve Loan / Cancel Loan).
+     * separate WhatsApp message a few seconds later, followed directly
+     * by the Approve Loan screen itself - skipping Main Menu entirely,
+     * so the person doesn't need an extra tap to get to Approve Loan
+     * right when the code they're waiting for actually arrives.
      * TODO: remove once a real SMS/backend delivers this for real.
      *
      * Includes a staleness check: only delivers if the loan is STILL the
@@ -204,7 +206,7 @@ public class LoanApplicationFlowService {
                     }
 
                     messageService.sendTextMessage(to, "Approval Code " + approvalCode)
-                            .then(screenService.sendMainMenu(to))
+                            .then(screenService.sendApproveLoanDetails(to, current.get()))
                             .doOnError(err -> log.error("Failed to deliver approval code to {}: {}", to, err.getMessage()))
                             .subscribe();
                 },
