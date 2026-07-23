@@ -315,7 +315,7 @@ public Mono<Void> handleEnterNewPin(String to, String text, UserSession session)
                         "\u2022 Do not share this PIN with anyone\n" +
                         "\u2022 For your protection, we strongly recommend deleting this chat or the messages containing your PIN"
                 )
-                .then(screenService.sendMainMenu(to));
+                .then(screenService.sendWelcome(to));
     }
 
     private void resetRegistrationFields(UserSession session) {
