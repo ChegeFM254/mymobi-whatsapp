@@ -63,6 +63,10 @@ public class ScreenMessageService {
                 .map(user -> "Hello " + user.getFirstName() + ", Welcome to MyMobi [Java]")
                 .orElse("Welcome to MyMobi [Java]");
 
+        // No footer at all on this screen, for either the personalized
+        // or generic case: "MyMobi Emergency Loan" was misleading, since
+        // MyMobi also offers Buy Airtime - "Select a service" alone is a
+        // complete, honest description of what's on offer.
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
                 "to", to,
@@ -71,7 +75,6 @@ public class ScreenMessageService {
                         "type", "list",
                         "header", Map.of("type", "text", "text", greeting),
                         "body", Map.of("text", "Select a service"),
-                        "footer", Map.of("text", "MyMobi Emergency Loan"),
                         "action", Map.of(
                                 "button", "Choose Option",
                                 "sections", List.of(Map.of(
