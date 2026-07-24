@@ -8,7 +8,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * In-memory registered-user storage — direct equivalent of the
+ * In-memory registered-user storage - direct equivalent of the
  * registeredUsers {} object in the Node.js version. Same durability
  * caveat as SessionStore: not backed by a real database yet, lost on
  * restart. This is the natural place the eventual database migration
@@ -29,5 +29,9 @@ public class RegisteredUserStore {
 
     public boolean exists(String phoneNumber) {
         return users.containsKey(phoneNumber);
+    }
+
+    public void delete(String phoneNumber) {
+        users.remove(phoneNumber);
     }
 }
