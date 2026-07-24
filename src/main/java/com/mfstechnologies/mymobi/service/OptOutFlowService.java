@@ -12,6 +12,15 @@ import reactor.core.publisher.Mono;
 
 import java.util.Optional;
 
+/**
+ * Opt Out flow: Yes/No confirmation, then PIN verification before
+ * actually opting the account out. Direct equivalent of the
+ * corresponding section of handleButton() / handleTextInput() in the
+ * Node.js version. Matches the Node version's single-attempt PIN check
+ * here (no retry loop) - getting the PIN wrong simply cancels the
+ * opt-out rather than locking the account, since this is a lower-risk
+ * action than logging in.
+ */
 @Service
 public class OptOutFlowService {
 
@@ -86,13 +95,22 @@ public class OptOutFlowService {
                     .then(screenService.sendCivilServantsMenu(to));
         }
 
-        user.setStatus("opted_out");
+        // Genuinely remove the account, not just mark it - once opted
+        // out, this number must be indistinguishable from one that's
+        // never registered at all (data protection requirement). The
+        // person must register again from scratch to use the service.
+        userStore.delete(to);
         log.info("user_opted_out to={}", to);
 
+        // The session ends immediately here - deliberately no screen is
+        // sent at all beyond the plain confirmation text. The person
+        // must type a trigger word (Hi, Loan, etc.) to start a genuinely
+        // fresh session, matching a brand new UserSession's own
+        // defaults exactly (step=welcome, newSession=true).
         session.setStep("welcome");
+        session.setNewSession(true);
         session.setAuthenticated(false);
 
-        return messageService.sendTextMessage(to, "You have been successfully opted out of the Emergency Loan service.")
-                .then(screenService.sendWelcome(to));
+        return messageService.sendTextMessage(to, "You have been successfully opted out of the Emergency Loan service.");
     }
 }
