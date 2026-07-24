@@ -77,7 +77,6 @@ class OptOutFlowServiceTest {
         UserSession session = new UserSession();
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
         when(screenService.sendCivilServantsMenu(FROM)).thenReturn(Mono.empty());
-
         optOutFlowService.handleOptOutConfirmation(FROM, "no", session).block();
 
         verify(screenService).sendCivilServantsMenu(FROM);
@@ -97,19 +96,47 @@ class OptOutFlowServiceTest {
     @Test
     void correctPinCompletesOptOut() {
         RegisteredUser existing = new RegisteredUser();
+        existing.setFirstName("Jane");
+        existing.setHashedPin(passwordEncoder.encode("11111"));
+        existing.setStatus("active");
+        userStore.save(FROM, existing);
+
+        UserSession session = new UserSession();
+        session.setAuthenticated(true);
+        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
+
+        optOutFlowService.handleOptOutPin(FROM, "11111", session).block();
+
+        // Data protection: the record is genuinely gone, not just
+        // marked - findByPhoneNumber must come back completely empty,
+        // indistinguishable from a number that's never registered.
+        assertThat(userStore.findByPhoneNumber(FROM)).isEmpty();
+
+        assertThat(session.isAuthenticated()).isFalse();
+        // The session ends immediately - no screen is sent automatically.
+        // This matches a brand new UserSession's own defaults exactly,
+        // so a later "Hi" correctly triggers a genuinely fresh Welcome.
+        assertThat(session.getStep()).isEqualTo("welcome");
+        assertThat(session.isNewSession()).isTrue();
+        verifyNoInteractions(screenService);
+    }
+
+    @Test
+    void optedOutNumberIsIndistinguishableFromNeverRegistered() {
+        RegisteredUser existing = new RegisteredUser();
         existing.setHashedPin(passwordEncoder.encode("11111"));
         existing.setStatus("active");
         userStore.save(FROM, existing);
 
         UserSession session = new UserSession();
         when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         optOutFlowService.handleOptOutPin(FROM, "11111", session).block();
 
-        assertThat(userStore.findByPhoneNumber(FROM).get().getStatus()).isEqualTo("opted_out");
-        assertThat(session.isAuthenticated()).isFalse();
-        verify(screenService).sendWelcome(FROM);
+        // A later Welcome screen for this number must show the generic
+        // greeting, never the old name - proving the data is genuinely
+        // gone, not just hidden behind a status flag.
+        assertThat(userStore.exists(FROM)).isFalse();
     }
 
     @Test
@@ -125,7 +152,7 @@ class OptOutFlowServiceTest {
 
         optOutFlowService.handleOptOutPin(FROM, "00000", session).block();
 
-        assertThat(userStore.findByPhoneNumber(FROM).get().getStatus()).isEqualTo("active");
+        assertThat(userStore.findByPhoneNumber(FROM).get().getStatus()).isEqualTo("active"); // unchanged
         verify(screenService).sendCivilServantsMenu(FROM);
     }
 }
