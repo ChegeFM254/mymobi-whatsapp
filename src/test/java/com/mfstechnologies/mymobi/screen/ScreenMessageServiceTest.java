@@ -75,6 +75,13 @@ class ScreenMessageServiceTest {
         Map<String, Object> header = (Map<String, Object>) interactive.get("header");
         return (String) header.get("text");
     }
+
+    @SuppressWarnings("unchecked")
+    private boolean capturedHasFooter() {
+        Map<String, Object> payload = payloadCaptor.getValue();
+        Map<String, Object> interactive = (Map<String, Object>) payload.get("interactive");
+        return interactive.containsKey("footer");
+    }
     @Test
     void showsApplyLoanWhenThereIsNoLoan() {
         screenService.sendMainMenu(FROM).block();
@@ -146,6 +153,7 @@ class ScreenMessageServiceTest {
         // Welcome specifically has these rows; Main Menu does not.
         assertThat(capturedRowIds()).contains("civil_servants", "buy_airtime");
     }
+
     @Test
     void homeScreenShowsWelcomeWhenSessionIsNull() {
         screenService.sendHomeScreen(FROM, null).block();
@@ -224,7 +232,7 @@ class ScreenMessageServiceTest {
         assertThat(capturedBodyText()).contains("Status: Cancelled");
         assertThat(capturedBodyText()).doesNotContain("Pending Approval");
     }
-    
+
     // ==================== sendWelcome personalization ====================
 
     @Test
@@ -236,6 +244,10 @@ class ScreenMessageServiceTest {
         screenService.sendWelcome(FROM).block();
 
         assertThat(capturedHeaderText()).isEqualTo("Hello John, Welcome to MyMobi [Java]");
+        // No footer on this screen at all, personalized or not - "MyMobi
+        // Emergency Loan" was misleading, since MyMobi also offers Buy
+        // Airtime; "Select a service" alone is a complete description.
+        assertThat(capturedHasFooter()).isFalse();
     }
 
     @Test
@@ -243,6 +255,7 @@ class ScreenMessageServiceTest {
         screenService.sendWelcome(FROM).block();
 
         assertThat(capturedHeaderText()).isEqualTo("Welcome to MyMobi [Java]");
+        assertThat(capturedHasFooter()).isFalse();
     }
 
     // ==================== sendConfirmation ====================
