@@ -1,6 +1,6 @@
 package com.mfstechnologies.mymobi.model;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 /**
  * A cleanly-parsed incoming WhatsApp message — pulls the handful of
