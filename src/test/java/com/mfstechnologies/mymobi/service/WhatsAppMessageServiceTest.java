@@ -4,21 +4,24 @@ import com.mfstechnologies.mymobi.config.WhatsAppProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.RestClient;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Supplier;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): rewritten for the blocking
+ * RestClient-based WhatsAppMessageService. No more .block() calls
+ * anywhere - every method call here is already synchronous, matching
+ * the production code it's testing.
+ */
 @ExtendWith(MockitoExtension.class)
 class WhatsAppMessageServiceTest {
 
@@ -26,11 +29,6 @@ class WhatsAppMessageServiceTest {
 
     @Mock
     private MessageDispatchQueue dispatchQueue;
-
-    @Captor
-    private ArgumentCaptor<String> recipientCaptor;
-    @Captor
-    private ArgumentCaptor<Supplier<CompletableFuture<Void>>> actionCaptor;
 
     private WhatsAppMessageService messageService;
 
@@ -40,7 +38,7 @@ class WhatsAppMessageServiceTest {
                 "test_token", "test_phone_id", "test_verify_token", "test_secret",
                 "v21.0", "https://mymobi-test.onrender.com"
         );
-        messageService = new WhatsAppMessageService(WebClient.builder(), properties, dispatchQueue);
+        messageService = new WhatsAppMessageService(RestClient.builder(), properties, dispatchQueue);
     }
 
     @Test
@@ -55,7 +53,7 @@ class WhatsAppMessageServiceTest {
         when(dispatchQueue.enqueue(eq(TO), any())).thenReturn(CompletableFuture.completedFuture(null));
 
         Map<String, Object> payload = Map.of("messaging_product", "whatsapp", "to", TO, "type", "text");
-        messageService.sendMessage(TO, payload).block();
+        messageService.sendMessage(TO, payload);
 
         verify(dispatchQueue).enqueue(eq(TO), any());
     }
@@ -64,7 +62,7 @@ class WhatsAppMessageServiceTest {
     void sendTextMessageAlsoRoutesThroughTheDispatchQueueForTheCorrectRecipient() {
         when(dispatchQueue.enqueue(eq(TO), any())).thenReturn(CompletableFuture.completedFuture(null));
 
-        messageService.sendTextMessage(TO, "Hello there").block();
+        messageService.sendTextMessage(TO, "Hello there");
 
         verify(dispatchQueue).enqueue(eq(TO), any());
     }
@@ -73,24 +71,42 @@ class WhatsAppMessageServiceTest {
     void differentRecipientsAreRoutedIndependently() {
         when(dispatchQueue.enqueue(anyString(), any())).thenReturn(CompletableFuture.completedFuture(null));
 
-        messageService.sendTextMessage("254700000001", "First").block();
-        messageService.sendTextMessage("254700000002", "Second").block();
+        messageService.sendTextMessage("254700000001", "First");
+        messageService.sendTextMessage("254700000002", "Second");
 
         verify(dispatchQueue).enqueue(eq("254700000001"), any());
         verify(dispatchQueue).enqueue(eq("254700000002"), any());
     }
 
     @Test
-    void sendMessageIsLazyAndOnlyCallsTheDispatchQueueOnSubscription() {
-        when(dispatchQueue.enqueue(eq(TO), any())).thenReturn(CompletableFuture.completedFuture(null));
+    void sendMessageBlocksUntilTheDispatchQueueFutureCompletes() {
+        CompletableFuture<Void> notYetComplete = new CompletableFuture<>();
+        when(dispatchQueue.enqueue(eq(TO), any())).thenReturn(notYetComplete);
 
-        Map<String, Object> payload = Map.of("to", TO);
-        var mono = messageService.sendMessage(TO, payload); // not subscribed yet
+        Thread sender = new Thread(() -> messageService.sendTextMessage(TO, "Hello"));
+        sender.start();
 
-        verifyNoInteractions(dispatchQueue);
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException ignored) {
+        }
+        notYetComplete.complete(null);
 
-        mono.block(); // subscribing now triggers it
+        try {
+            sender.join(1000);
+        } catch (InterruptedException ignored) {
+        }
 
         verify(dispatchQueue).enqueue(eq(TO), any());
+    }
+
+    @Test
+    void sendMessagePropagatesAFailedDispatchQueueFutureAsARuntimeException() {
+        CompletableFuture<Void> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new IllegalStateException("simulated send failure"));
+        when(dispatchQueue.enqueue(eq(TO), any())).thenReturn(failed);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> messageService.sendMessage(TO, Map.of("to", TO)))
+                .isInstanceOf(RuntimeException.class);
     }
 }
