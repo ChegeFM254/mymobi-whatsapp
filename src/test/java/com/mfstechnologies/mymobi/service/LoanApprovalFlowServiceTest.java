@@ -12,12 +12,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import reactor.core.publisher.Mono;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): rewritten for the now-void
+ * LoanApprovalFlowService methods. No more .block() calls or
+ * Mono.empty() stubs anywhere.
+ */
 @ExtendWith(MockitoExtension.class)
 class LoanApprovalFlowServiceTest {
 
@@ -57,9 +61,8 @@ class LoanApprovalFlowServiceTest {
     void approveLoanMenuShowsDetailsWhenLoanIsPendingApproval() {
         loanStore.save(FROM, pendingLoan());
         UserSession session = new UserSession();
-        when(screenService.sendApproveLoanDetails(eq(FROM), any())).thenReturn(Mono.empty());
 
-        approvalFlow.handleApproveLoanMenu(FROM, session).block();
+        approvalFlow.handleApproveLoanMenu(FROM, session);
 
         verify(screenService).sendApproveLoanDetails(eq(FROM), any());
     }
@@ -67,9 +70,8 @@ class LoanApprovalFlowServiceTest {
     @Test
     void approveLoanMenuRedirectsWhenNoLoanExists() {
         UserSession session = new UserSession();
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        approvalFlow.handleApproveLoanMenu(FROM, session).block();
+        approvalFlow.handleApproveLoanMenu(FROM, session);
 
         verify(screenService).sendMainMenu(FROM);
         verify(screenService, never()).sendApproveLoanDetails(anyString(), any());
@@ -81,9 +83,8 @@ class LoanApprovalFlowServiceTest {
     void correctApprovalCodeAdvancesToPayrollNumberStep() {
         loanStore.save(FROM, pendingLoan());
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        approvalFlow.handleEnterApprovalCode(FROM, "654321", session).block();
+        approvalFlow.handleEnterApprovalCode(FROM, "654321", session);
 
         assertThat(session.getStep()).isEqualTo("approval_payroll_number");
     }
@@ -93,9 +94,8 @@ class LoanApprovalFlowServiceTest {
         Loan loan = pendingLoan();
         loanStore.save(FROM, loan);
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        approvalFlow.handleEnterApprovalCode(FROM, "000000", session).block();
+        approvalFlow.handleEnterApprovalCode(FROM, "000000", session);
 
         assertThat(loan.getApprovalCodeAttempts()).isEqualTo(1);
         assertThat(session.getStep()).isNotEqualTo("approval_payroll_number");
@@ -107,10 +107,8 @@ class LoanApprovalFlowServiceTest {
         loan.setApprovalCodeAttempts(2);
         loanStore.save(FROM, loan);
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
 
-        approvalFlow.handleEnterApprovalCode(FROM, "000000", session).block();
+        approvalFlow.handleEnterApprovalCode(FROM, "000000", session);
 
         assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
     }
@@ -126,10 +124,8 @@ class LoanApprovalFlowServiceTest {
         userStore.save(FROM, user);
 
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
 
-        approvalFlow.handleApprovalPayrollNumber(FROM, "19999999", session).block();
+        approvalFlow.handleApprovalPayrollNumber(FROM, "19999999", session);
 
         assertThat(loan.getStatus()).isEqualTo("approved");
         assertThat(loan.getApprovedAt()).isNotNull();
@@ -146,9 +142,8 @@ class LoanApprovalFlowServiceTest {
         userStore.save(FROM, user);
 
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        approvalFlow.handleApprovalPayrollNumber(FROM, "10000000", session).block();
+        approvalFlow.handleApprovalPayrollNumber(FROM, "10000000", session);
 
         assertThat(loan.getApprovalPayrollAttempts()).isEqualTo(1);
         assertThat(loan.getApprovalCodeAttempts()).isZero();
@@ -161,10 +156,8 @@ class LoanApprovalFlowServiceTest {
     void confirmingCancelRemovesTheLoan() {
         loanStore.save(FROM, pendingLoan());
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        approvalFlow.handleCancelLoanYes(FROM, session).block();
+        approvalFlow.handleCancelLoanYes(FROM, session);
 
         assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
     }
@@ -173,9 +166,8 @@ class LoanApprovalFlowServiceTest {
     void decliningCancelKeepsTheLoanPending() {
         loanStore.save(FROM, pendingLoan());
         UserSession session = new UserSession();
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        approvalFlow.handleCancelLoanNo(FROM, session).block();
+        approvalFlow.handleCancelLoanNo(FROM, session);
 
         assertThat(loanStore.findByPhoneNumber(FROM)).isPresent();
         verify(screenService).sendMainMenu(FROM);
