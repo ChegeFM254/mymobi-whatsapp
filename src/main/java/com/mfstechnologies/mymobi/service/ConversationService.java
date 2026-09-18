@@ -7,12 +7,21 @@ import com.mfstechnologies.mymobi.session.SessionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): every method here used to
+ * return Mono<Void>, with the switch expressions yielding a Mono<Void>
+ * from each branch. Now that every flow service method is void, the
+ * switch expressions became plain switch STATEMENTS instead (still
+ * arrow syntax, just calling the method rather than returning its
+ * result) - Java doesn't allow an expression switch where branches
+ * return void, so this is a genuine, necessary shape change, not just a
+ * mechanical find-replace.
+ */
 @Service
 public class ConversationService {
 
@@ -59,7 +68,7 @@ public class ConversationService {
             PayslipFlowService payslipFlowService,
             LoanDocumentFlowService loanDocumentFlowService,
             InactivityTimeoutService inactivityTimeoutService
-    ) {
+            ) {
         this.sessionStore = sessionStore;
         this.screenService = screenService;
         this.messageService = messageService;
@@ -74,11 +83,12 @@ public class ConversationService {
         this.loanDocumentFlowService = loanDocumentFlowService;
         this.inactivityTimeoutService = inactivityTimeoutService;
     }
-    public Mono<Void> handleIncomingMessage(IncomingMessage message) {
+
+    public void handleIncomingMessage(IncomingMessage message) {
         String from = message.from();
         if (from == null) {
             log.warn("message_missing_from_field");
-            return Mono.empty();
+            return;
         }
 
         messageService.resetSendTurn(from);
@@ -89,7 +99,7 @@ public class ConversationService {
 
         if (isDebounced(session)) {
             log.info("debounced_duplicate_input from={}", from);
-            return Mono.empty();
+            return;
         }
         session.setLastProcessedAt(Instant.now());
 
@@ -100,18 +110,18 @@ public class ConversationService {
 
         if (isFreshWelcomeTrigger) {
             session.setNewSession(false);
-            return screenService.sendWelcome(from);
+            screenService.sendWelcome(from);
+            return;
         }
 
         if (message.hasButton()) {
-            return handleButton(from, message.buttonId(), session);
+            handleButton(from, message.buttonId(), session);
+            return;
         }
 
         if (message.hasText()) {
-            return handleText(from, message.text(), session);
+            handleText(from, message.text(), session);
         }
-
-        return Mono.empty();
     }
 
     private boolean isDebounced(UserSession session) {
@@ -126,20 +136,24 @@ public class ConversationService {
         String normalized = text.trim().toLowerCase();
         return TRIGGER_WORDS.contains(normalized) || normalized.contains(TRIGGER_SUBSTRING);
     }
-    private Mono<Void> handleButton(String to, String buttonId, UserSession session) {
-        log.info("button_tapped to={} buttonId={}", to, buttonId);
+
+    private void handleButton(String to, String buttonId, UserSession session) {
+                log.info("button_tapped to={} buttonId={}", to, buttonId);
 
         if (EDIT_FIELD_IDS.contains(buttonId)) {
-            return registrationFlowService.handleEditFieldSelect(to, buttonId, session);
+            registrationFlowService.handleEditFieldSelect(to, buttonId, session);
+            return;
         }
         if (TENURE_IDS.contains(buttonId)) {
-            return loanApplicationFlowService.handleTenureSelect(to, buttonId, session);
+            loanApplicationFlowService.handleTenureSelect(to, buttonId, session);
+            return;
         }
         if (buttonId != null && buttonId.startsWith(PAY_INSTALLMENTS_PREFIX)) {
-            return loanPaymentFlowService.handlePayInstallmentsSelect(to, buttonId, session);
+            loanPaymentFlowService.handlePayInstallmentsSelect(to, buttonId, session);
+            return;
         }
 
-        return switch (buttonId) {
+        switch (buttonId) {
             case "civil_servants" -> authFlowService.handleCivilServants(to, session);
             case "login_menu" -> authFlowService.handleLoginMenu(to, session);
             case "logout" -> authFlowService.handleLogout(to, session);
@@ -187,21 +201,23 @@ public class ConversationService {
             case "confirm_loan_clearance" -> loanDocumentFlowService.handleConfirmLoanClearance(to, session);
             case "cancel_loan_clearance" -> loanDocumentFlowService.handleCancelLoanClearance(to, session);
 
-            default ->
-                    messageService.sendTextMessage(to, "Sorry, I didn't understand that option. Returning to the main menu.")
-                            .then(screenService.sendHomeScreen(to, session));
-        };
+            default -> {
+                messageService.sendTextMessage(to, "Sorry, I didn't understand that option. Returning to the main menu.");
+                screenService.sendHomeScreen(to, session);
+            }
+        }
     }
-    private Mono<Void> handleText(String to, String text, UserSession session) {
+        private void handleText(String to, String text, UserSession session) {
         log.info("text_received to={} step={}", to, session.getStep());
 
         String step = session.getStep();
 
         if (EDIT_FIELD_IDS.contains(step)) {
-            return registrationFlowService.handleEditFieldText(to, text, session);
+            registrationFlowService.handleEditFieldText(to, text, session);
+            return;
         }
 
-        return switch (step) {
+        switch (step) {
             case "login_enter_upn" -> authFlowService.handleLoginEnterUpn(to, text, session);
             case "login_enter_pin" -> authFlowService.handleLoginEnterPin(to, text, session);
             case "login_enter_verification_code" -> authFlowService.handleLoginEnterVerificationCode(to, text, session);
@@ -233,19 +249,20 @@ public class ConversationService {
             case "enter_payslip_months" -> payslipFlowService.handleEnterPayslipMonths(to, text, session);
 
             default -> handleUnrecognizedStep(to, session);
-        };
+        }
     }
 
-    private Mono<Void> handleUnrecognizedStep(String to, UserSession session) {
+    private void handleUnrecognizedStep(String to, UserSession session) {
         if (session.isAuthenticated()) {
             session.setStep("welcome");
             session.setCurrentMenu(null);
-            return messageService.sendTextMessage(to, "Sorry, something went wrong. Let's start over.")
-                    .then(screenService.sendHomeScreen(to, session));
+            messageService.sendTextMessage(to, "Sorry, something went wrong. Let's start over.");
+            screenService.sendHomeScreen(to, session);
+            return;
         }
 
         sessionStore.delete(to);
-        return messageService.sendTextMessage(to, "Sorry, something went wrong. Let's start over.")
-                .then(screenService.sendWelcome(to));
+        messageService.sendTextMessage(to, "Sorry, something went wrong. Let's start over.");
+        screenService.sendWelcome(to);
     }
 }
