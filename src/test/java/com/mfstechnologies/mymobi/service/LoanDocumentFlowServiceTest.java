@@ -14,12 +14,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import reactor.core.publisher.Mono;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): rewritten for the now-void
+ * LoanDocumentFlowService methods. No more .block() calls or
+ * Mono.empty() stubs anywhere.
+ */
 @ExtendWith(MockitoExtension.class)
 class LoanDocumentFlowServiceTest {
 
@@ -54,10 +58,9 @@ class LoanDocumentFlowServiceTest {
     @Test
     void loanStatementMenuRefusesWhenNoLoanOnRecord() {
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        documentFlow.handleLoanStatementMenu(FROM, session).block();
+        documentFlow.handleLoanStatementMenu(FROM, session);
+
         verify(screenService, never()).sendLoanStatementConfirm(anyString(), anyDouble());
     }
 
@@ -65,9 +68,8 @@ class LoanDocumentFlowServiceTest {
     void loanStatementMenuShowsConfirmationWhenALoanExists() {
         loanStore.save(FROM, new Loan());
         UserSession session = new UserSession();
-        when(screenService.sendLoanStatementConfirm(FROM, 23.20)).thenReturn(Mono.empty());
 
-        documentFlow.handleLoanStatementMenu(FROM, session).block();
+        documentFlow.handleLoanStatementMenu(FROM, session);
 
         assertThat(session.getPendingDocumentType()).isEqualTo("loan_statement");
         verify(screenService).sendLoanStatementConfirm(FROM, 23.20);
@@ -81,14 +83,12 @@ class LoanDocumentFlowServiceTest {
         loanStore.save(FROM, new Loan());
 
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        documentFlow.handleConfirmLoanStatement(FROM, session).block();
+        documentFlow.handleConfirmLoanStatement(FROM, session);
 
         verify(messageService).sendTextMessage(eq(FROM),
                 eq("You are about to pay KES 23.20 to MyMobi account XXXXX. Please enter your Mpesa PIN."));
-    }
+            }
 
     @Test
     void confirmingLoanStatementGeneratesADocumentLink() {
@@ -98,10 +98,8 @@ class LoanDocumentFlowServiceTest {
         loanStore.save(FROM, new Loan());
 
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        documentFlow.handleConfirmLoanStatement(FROM, session).block();
+        documentFlow.handleConfirmLoanStatement(FROM, session);
 
         assertThat(session.getPendingDocumentType()).isNull();
         verify(messageService).sendTextMessage(eq(FROM), contains("Please click on this link to access your Loan Statement"));
@@ -109,13 +107,12 @@ class LoanDocumentFlowServiceTest {
     }
 
     // ==================== LOAN CLEARANCE LETTER ====================
-@Test
+
+    @Test
     void loanClearanceMenuRefusesWhenNoLoanOnRecord() {
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        documentFlow.handleLoanClearanceMenu(FROM, session).block();
+        documentFlow.handleLoanClearanceMenu(FROM, session);
 
         verify(screenService, never()).sendLoanClearanceConfirm(anyString(), anyDouble());
     }
@@ -127,11 +124,10 @@ class LoanDocumentFlowServiceTest {
         loanStore.save(FROM, outstanding);
 
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), contains("outstanding"))).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        documentFlow.handleLoanClearanceMenu(FROM, session).block();
+        documentFlow.handleLoanClearanceMenu(FROM, session);
 
+        verify(messageService).sendTextMessage(eq(FROM), contains("outstanding"));
         verify(screenService, never()).sendLoanClearanceConfirm(anyString(), anyDouble());
     }
 
@@ -142,12 +138,12 @@ class LoanDocumentFlowServiceTest {
         loanStore.save(FROM, paid);
 
         UserSession session = new UserSession();
-        when(screenService.sendLoanClearanceConfirm(FROM, 23.20)).thenReturn(Mono.empty());
 
-        documentFlow.handleLoanClearanceMenu(FROM, session).block();
+        documentFlow.handleLoanClearanceMenu(FROM, session);
 
         assertThat(session.getPendingDocumentType()).isEqualTo("loan_clearance");
     }
+
     @Test
     void confirmingLoanClearanceSendsStkPushPromptFirst() {
         RegisteredUser user = new RegisteredUser();
@@ -158,10 +154,8 @@ class LoanDocumentFlowServiceTest {
         loanStore.save(FROM, paid);
 
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        documentFlow.handleConfirmLoanClearance(FROM, session).block();
+        documentFlow.handleConfirmLoanClearance(FROM, session);
 
         verify(messageService).sendTextMessage(eq(FROM),
                 eq("You are about to pay KES 23.20 to MyMobi account XXXXX. Please enter your Mpesa PIN."));
@@ -177,10 +171,8 @@ class LoanDocumentFlowServiceTest {
         loanStore.save(FROM, paid);
 
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        documentFlow.handleConfirmLoanClearance(FROM, session).block();
+        documentFlow.handleConfirmLoanClearance(FROM, session);
 
         assertThat(session.getPendingDocumentType()).isNull();
         verify(messageService).sendTextMessage(eq(FROM), contains("Please click on this link to access your Loan Clearance Letter"));
