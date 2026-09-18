@@ -8,7 +8,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
 
 import java.util.Optional;
 
@@ -20,6 +19,10 @@ import java.util.Optional;
  * here (no retry loop) - getting the PIN wrong simply cancels the
  * opt-out rather than locking the account, since this is a lower-risk
  * action than logging in.
+ *
+ * WORKSTREAM B (reactive -> synchronous): every method here used to
+ * return Mono<Void>, chaining follow-up screens with .then(). All
+ * converted to plain blocking void methods with sequential statements.
  */
 @Service
 public class OptOutFlowService {
@@ -46,53 +49,59 @@ public class OptOutFlowService {
         this.lockoutService = lockoutService;
     }
 
-    public Mono<Void> handleOptOut(String to, UserSession session) {
+    public void handleOptOut(String to, UserSession session) {
         long lockoutMinutes = lockoutService.getLockoutMinutesRemaining(to);
         if (lockoutMinutes > 0) {
-            return messageService.sendTextMessage(to,
+            messageService.sendTextMessage(to,
                     "Too many incorrect attempts. Your account is temporarily locked. Please try again in " + lockoutMinutes + " minute(s).");
+            return;
         }
 
         if (userStore.findByPhoneNumber(to).isEmpty()) {
-            return messageService.sendTextMessage(to, "No account found for this number.")
-                    .then(screenService.sendCivilServantsMenu(to));
+            messageService.sendTextMessage(to, "No account found for this number.");
+            screenService.sendCivilServantsMenu(to);
+            return;
         }
 
         session.setStep("opt_out_confirmation");
-        return messageService.sendTextMessage(to, "You are about to OPT OUT of Emergency Loan Services\n\nTo proceed, type YES or NO");
+        messageService.sendTextMessage(to, "You are about to OPT OUT of Emergency Loan Services\n\nTo proceed, type YES or NO");
     }
 
-    public Mono<Void> handleOptOutConfirmation(String to, String text, UserSession session) {
+    public void handleOptOutConfirmation(String to, String text, UserSession session) {
         String response = text == null ? "" : text.trim().toLowerCase();
 
         if (response.equals("yes") || response.equals("y")) {
             session.setStep("opt_out_pin");
-            return messageService.sendTextMessage(to, "To confirm opt out, please enter your 5-digit PIN:");
+            messageService.sendTextMessage(to, "To confirm opt out, please enter your 5-digit PIN:");
+            return;
         }
 
         if (response.equals("no") || response.equals("n")) {
             session.setStep("welcome");
-            return messageService.sendTextMessage(to, "Opt out cancelled.")
-                    .then(screenService.sendCivilServantsMenu(to));
+            messageService.sendTextMessage(to, "Opt out cancelled.");
+            screenService.sendCivilServantsMenu(to);
+            return;
         }
 
-        return messageService.sendTextMessage(to, "Please reply with Yes or No.");
+        messageService.sendTextMessage(to, "Please reply with Yes or No.");
     }
 
-    public Mono<Void> handleOptOutPin(String to, String text, UserSession session) {
+    public void handleOptOutPin(String to, String text, UserSession session) {
         Optional<RegisteredUser> existing = userStore.findByPhoneNumber(to);
 
         if (existing.isEmpty()) {
-            return messageService.sendTextMessage(to, "No account found for this number.")
-                    .then(screenService.sendWelcome(to));
+            messageService.sendTextMessage(to, "No account found for this number.");
+            screenService.sendWelcome(to);
+            return;
         }
 
         RegisteredUser user = existing.get();
 
         if (text == null || !passwordEncoder.matches(text, user.getHashedPin())) {
             session.setStep("welcome");
-            return messageService.sendTextMessage(to, "Incorrect PIN. Opt out cancelled.")
-                    .then(screenService.sendCivilServantsMenu(to));
+            messageService.sendTextMessage(to, "Incorrect PIN. Opt out cancelled.");
+            screenService.sendCivilServantsMenu(to);
+            return;
         }
 
         // Genuinely remove the account, not just mark it - once opted
@@ -111,6 +120,6 @@ public class OptOutFlowService {
         session.setNewSession(true);
         session.setAuthenticated(false);
 
-        return messageService.sendTextMessage(to, "You have been successfully opted out of the Emergency Loan service.");
+        messageService.sendTextMessage(to, "You have been successfully opted out of the Emergency Loan service.");
     }
 }
