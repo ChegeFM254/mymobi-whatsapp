@@ -13,7 +13,6 @@ import com.mfstechnologies.mymobi.validation.FieldValidators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -22,6 +21,15 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): every method here used to
+ * return Mono<Void>, chaining follow-up screens with .then(). All
+ * converted to plain blocking void methods with sequential statements.
+ * deliverApprovalCodeAfterDelay's error handling changed from
+ * .doOnError().subscribe() to a plain try/catch, since sendTextMessage()
+ * now throws directly instead of carrying errors on a reactive error
+ * channel.
+ */
 @Service
 public class LoanApplicationFlowService {
 
@@ -54,54 +62,61 @@ public class LoanApplicationFlowService {
         this.userStore = userStore;
         this.calculationService = calculationService;
     }
+
     // ==================== APPLY LOAN ====================
 
-    public Mono<Void> handleApplyLoan(String to, UserSession session) {
+    public void handleApplyLoan(String to, UserSession session) {
         Optional<Loan> existing = loanStore.findByPhoneNumber(to);
         boolean hasActiveLoan = existing.isPresent()
                 && ("pending_approval".equals(existing.get().getStatus()) || "approved".equals(existing.get().getStatus()));
 
         if (hasActiveLoan) {
-            return messageService.sendTextMessage(to, "You already have an active loan. Please complete or repay it before applying for a new one.")
-                    .then(screenService.sendMainMenu(to));
+            messageService.sendTextMessage(to, "You already have an active loan. Please complete or repay it before applying for a new one.");
+            screenService.sendMainMenu(to);
+                        return;
         }
 
         session.setCurrentMenu("loan_tenure_menu");
-        return screenService.sendLoanTenureOptions(to);
+        screenService.sendLoanTenureOptions(to);
     }
 
-    public Mono<Void> handleTenureSelect(String to, String tenureId, UserSession session) {
+    public void handleTenureSelect(String to, String tenureId, UserSession session) {
         TenureOption tenure = TENURE_OPTIONS.get(tenureId);
         if (tenure == null) {
             log.warn("Unknown tenure id {} for {}", tenureId, to);
-            return screenService.sendLoanTenureOptions(to);
+            screenService.sendLoanTenureOptions(to);
+            return;
         }
 
         session.setLoanTenureMonths(tenure.months());
         session.setLoanLimit(tenure.limit());
-        return sendEnterLoanAmountPrompt(to, session);
+        sendEnterLoanAmountPrompt(to, session);
     }
 
-    public Mono<Void> handleStartLoanAmountEntry(String to, UserSession session) {
-        return sendEnterLoanAmountPrompt(to, session);
+    public void handleStartLoanAmountEntry(String to, UserSession session) {
+        sendEnterLoanAmountPrompt(to, session);
     }
 
-    private Mono<Void> sendEnterLoanAmountPrompt(String to, UserSession session) {
+    private void sendEnterLoanAmountPrompt(String to, UserSession session) {
         session.setStep("enter_loan_amount");
-        return messageService.sendTextMessage(to,
+        messageService.sendTextMessage(to,
                 "Enter Loan Amount (e.g., 35000). Your limit is KES " + session.getLoanLimit() + ":");
     }
-    public Mono<Void> handleEnterLoanAmount(String to, String text, UserSession session) {
+
+    public void handleEnterLoanAmount(String to, String text, UserSession session) {
         Integer amount = parsePositiveInteger(text);
         if (amount == null) {
-            return messageService.sendTextMessage(to, "Please enter a valid loan amount in KES (numbers only, e.g. 35000).");
+            messageService.sendTextMessage(to, "Please enter a valid loan amount in KES (numbers only, e.g. 35000).");
+            return;
         }
         if (amount < MIN_LOAN_AMOUNT) {
-            return messageService.sendTextMessage(to, "Minimum loan amount is KES 1,000. Please enter a higher amount.");
+            messageService.sendTextMessage(to, "Minimum loan amount is KES 1,000. Please enter a higher amount.");
+            return;
         }
         if (amount > session.getLoanLimit()) {
-            return messageService.sendTextMessage(to,
+            messageService.sendTextMessage(to,
                     "That exceeds your loan limit of KES " + session.getLoanLimit() + ". Please enter a lower amount.");
+            return;
         }
 
         session.setLoanAmount(amount);
@@ -109,30 +124,30 @@ public class LoanApplicationFlowService {
         session.setCurrentMenu("loan_breakdown_menu");
 
         LoanBreakdown breakdown = calculationService.calculateBreakdown(amount, session.getLoanTenureMonths());
-        return screenService.sendLoanBreakdown(to, breakdown, session.getLoanTenureMonths());
+        screenService.sendLoanBreakdown(to, breakdown, session.getLoanTenureMonths());
     }
 
     // ==================== BREAKDOWN: ACCEPT / DECLINE ====================
 
-    public Mono<Void> handleAcceptLoan(String to, UserSession session) {
+    public void handleAcceptLoan(String to, UserSession session) {
         session.setStep("enter_loan_payroll_number");
-        return messageService.sendTextMessage(to, "Please Enter Payroll Number to complete the transaction:");
+        messageService.sendTextMessage(to, "Please Enter Payroll Number to complete the transaction:");
     }
 
-    public Mono<Void> handleDeclineLoan(String to, UserSession session) {
+    public void handleDeclineLoan(String to, UserSession session) {
         clearLoanApplicationFields(session);
-        return messageService.sendTextMessage(to, "Loan application declined.")
-                .then(screenService.sendMainMenu(to));
+        messageService.sendTextMessage(to, "Loan application declined.");
+        screenService.sendMainMenu(to);
     }
 
     // ==================== PAYROLL NUMBER + SUBMISSION ====================
 
-    public Mono<Void> handleEnterPayrollNumber(String to, String text, UserSession session) {
+    public void handleEnterPayrollNumber(String to, String text, UserSession session) {
         if (!FieldValidators.isValidUpn(text)) {
-            return messageService.sendTextMessage(to, "UPN should be up to 11 digits and start with 1 or 2. Please try again.");
+            messageService.sendTextMessage(to, "UPN should be up to 11 digits and start with 1 or 2. Please try again.");
+            return;
         }
-
-        Optional<RegisteredUser> registeredUser = userStore.findByPhoneNumber(to);
+                Optional<RegisteredUser> registeredUser = userStore.findByPhoneNumber(to);
         boolean matches = registeredUser.isPresent() && text.equals(registeredUser.get().getUpn());
 
         if (!matches) {
@@ -140,17 +155,20 @@ public class LoanApplicationFlowService {
 
             if (session.getPayrollNumberAttempts() >= MAX_PAYROLL_ATTEMPTS) {
                 clearLoanApplicationFields(session);
-                return messageService.sendTextMessage(to, "Too many incorrect attempts. Your loan application has been cancelled for your security.")
-                        .then(screenService.sendMainMenu(to));
+                messageService.sendTextMessage(to, "Too many incorrect attempts. Your loan application has been cancelled for your security.");
+                screenService.sendMainMenu(to);
+                return;
             }
 
             int attemptsLeft = MAX_PAYROLL_ATTEMPTS - session.getPayrollNumberAttempts();
-            return messageService.sendTextMessage(to, "That Payroll Number does not match our records. You have " + attemptsLeft + " attempt(s) remaining.");
+            messageService.sendTextMessage(to, "That Payroll Number does not match our records. You have " + attemptsLeft + " attempt(s) remaining.");
+            return;
         }
 
-        return submitLoanApplication(to, text, session);
+        submitLoanApplication(to, text, session);
     }
-    private Mono<Void> submitLoanApplication(String to, String payrollNumber, UserSession session) {
+
+    private void submitLoanApplication(String to, String payrollNumber, UserSession session) {
         LoanBreakdown breakdown = calculationService.calculateBreakdown(session.getLoanAmount(), session.getLoanTenureMonths());
         String refNo = CodeGenerator.generateLoanRefNo();
         String approvalCode = CodeGenerator.generateSixDigitCode();
@@ -177,7 +195,7 @@ public class LoanApplicationFlowService {
 
         deliverApprovalCodeAfterDelay(to, approvalCode, refNo);
 
-        return messageService.sendTextMessage(to, "Your loan request has been submitted. Please wait for the approval code SMS from MyMobi.");
+        messageService.sendTextMessage(to, "Your loan request has been submitted. Please wait for the approval code SMS from MyMobi.");
     }
 
     /**
@@ -199,16 +217,18 @@ public class LoanApplicationFlowService {
                     boolean stillPending = current.isPresent()
                             && refNo.equals(current.get().getRefNo())
                             && "pending_approval".equals(current.get().getStatus());
-
+                    
                     if (!stillPending) {
                         log.info("stale_approval_code_delivery_skipped to={} refNo={}", to, refNo);
                         return;
                     }
 
-                    messageService.sendTextMessage(to, "Approval Code " + approvalCode)
-                            .then(screenService.sendApproveLoanDetails(to, current.get()))
-                            .doOnError(err -> log.error("Failed to deliver approval code to {}: {}", to, err.getMessage()))
-                            .subscribe();
+                    try {
+                        messageService.sendTextMessage(to, "Approval Code " + approvalCode);
+                        screenService.sendApproveLoanDetails(to, current.get());
+                    } catch (Exception err) {
+                        log.error("Failed to deliver approval code to {}: {}", to, err.getMessage());
+                    }
                 },
                 CompletableFuture.delayedExecutor(5, TimeUnit.SECONDS)
         );
@@ -222,22 +242,25 @@ public class LoanApplicationFlowService {
      * (or no tracked context) falls back to sendHomeScreen (Main Menu
      * if authenticated, Welcome otherwise).
      */
-    public Mono<Void> handleBack(String to, UserSession session) {
+    public void handleBack(String to, UserSession session) {
         String currentMenu = session.getCurrentMenu();
 
         if ("loan_tenure_menu".equals(currentMenu)) {
-            return screenService.sendMainMenu(to);
+            screenService.sendMainMenu(to);
+            return;
         }
         if ("loan_amount_menu".equals(currentMenu)) {
             session.setCurrentMenu("loan_tenure_menu");
-            return screenService.sendLoanTenureOptions(to);
+            screenService.sendLoanTenureOptions(to);
+            return;
         }
         if ("loan_breakdown_menu".equals(currentMenu)) {
             session.setCurrentMenu("loan_amount_menu");
-            return screenService.sendLoanAmountMenu(to, session.getLoanLimit(), session.getLoanTenureMonths());
+            screenService.sendLoanAmountMenu(to, session.getLoanLimit(), session.getLoanTenureMonths());
+            return;
         }
 
-        return screenService.sendHomeScreen(to, session);
+        screenService.sendHomeScreen(to, session);
     }
 
     private void clearLoanApplicationFields(UserSession session) {
