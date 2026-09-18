@@ -12,11 +12,18 @@ import com.mfstechnologies.mymobi.validation.CodeGenerator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.Optional;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): every method here used to
+ * return Mono<Void>, chaining follow-up steps with .then() - including
+ * a Mono.defer(...) wrapping the simulated STK push and document
+ * generation. All converted to plain blocking void methods with
+ * sequential statements; the defer wrapper is simply gone, since there's
+ * no longer a reactive pipeline for it to defer within.
+ */
 @Service
 public class PayslipFlowService {
 
@@ -46,19 +53,20 @@ public class PayslipFlowService {
         this.properties = properties;
     }
 
-    public Mono<Void> handlePayslipMenu(String to, UserSession session) {
+    public void handlePayslipMenu(String to, UserSession session) {
         session.setStep("enter_payslip_months");
         String prompt = String.format(
                 "Payslip for each month costs KES %.2f. Enter the number of months (1-12):",
                 DOCUMENT_COST_PER_UNIT
         );
-        return messageService.sendTextMessage(to, prompt);
+        messageService.sendTextMessage(to, prompt);
     }
 
-    public Mono<Void> handleEnterPayslipMonths(String to, String text, UserSession session) {
+    public void handleEnterPayslipMonths(String to, String text, UserSession session) {
         Integer months = parseMonths(text);
         if (months == null) {
-            return messageService.sendTextMessage(to, "Please enter a whole number between 1 and 12.");
+            messageService.sendTextMessage(to, "Please enter a whole number between 1 and 12.");
+            return;
         }
 
         double cost = DOCUMENT_COST_PER_UNIT * months;
@@ -66,52 +74,52 @@ public class PayslipFlowService {
         session.setPendingDocumentMonths(months);
         session.setStep("confirm_payslip");
 
-        return screenService.sendPayslipConfirm(to, months, cost);
+        screenService.sendPayslipConfirm(to, months, cost);
     }
 
-    public Mono<Void> handleConfirmPayslip(String to, UserSession session) {
+    public void handleConfirmPayslip(String to, UserSession session) {
         Optional<RegisteredUser> userOpt = userStore.findByPhoneNumber(to);
         Integer months = session.getPendingDocumentMonths();
 
         if (userOpt.isEmpty() || months == null) {
             clearPendingDocumentFields(session);
-            return messageService.sendTextMessage(to, "Something went wrong. Please try again.")
-                    .then(screenService.sendMainMenu(to));
+            messageService.sendTextMessage(to, "Something went wrong. Please try again.");
+            screenService.sendMainMenu(to);
+            return;
         }
         RegisteredUser user = userOpt.get();
         double cost = DOCUMENT_COST_PER_UNIT * months;
 
-        return messageService.sendTextMessage(to,
-                        String.format("You are about to pay KES %.2f to MyMobi account XXXXX. Please enter your Mpesa PIN.", cost))
-                .then(Mono.defer(() -> {
-                    log.info("mpesa_stk_push_simulated to={} purpose=payslip months={}", to, months);
+        messageService.sendTextMessage(to,
+                String.format("You are about to pay KES %.2f to MyMobi account XXXXX. Please enter your Mpesa PIN.", cost));
 
-                    String html = documentHtmlService.generatePayslipHtml(user, months);
+        log.info("mpesa_stk_push_simulated to={} purpose=payslip months={}", to, months);
 
-                    StoredDocument document = new StoredDocument();
-                    document.setPhoneNumber(to);
-                    document.setDocType("payslip");
-                    document.setUpn(user.getUpn());
-                    document.setHtml(html);
-                    document.setCreatedAt(Instant.now());
+        String html = documentHtmlService.generatePayslipHtml(user, months);
 
-                    String token = CodeGenerator.generateDocumentToken();
-                    documentStore.save(token, document);
+        StoredDocument document = new StoredDocument();
+        document.setPhoneNumber(to);
+        document.setDocType("payslip");
+        document.setUpn(user.getUpn());
+        document.setHtml(html);
+        document.setCreatedAt(Instant.now());
 
-                    log.info("document_generated to={} docType=payslip token={}", to, token);
+        String token = CodeGenerator.generateDocumentToken();
+        documentStore.save(token, document);
 
-                    clearPendingDocumentFields(session);
+        log.info("document_generated to={} docType=payslip token={}", to, token);
 
-                    String link = properties.publicBaseUrl() + "/documents/" + token;
-                    return messageService.sendTextMessage(to, "Please click on this link to access your Payslip " + link)
-                            .then(screenService.sendMainMenu(to));
-                }));
+        clearPendingDocumentFields(session);
+
+        String link = properties.publicBaseUrl() + "/documents/" + token;
+        messageService.sendTextMessage(to, "Please click on this link to access your Payslip " + link);
+        screenService.sendMainMenu(to);
     }
 
-    public Mono<Void> handleCancelPayslip(String to, UserSession session) {
+    public void handleCancelPayslip(String to, UserSession session) {
         clearPendingDocumentFields(session);
-        return messageService.sendTextMessage(to, "Payslip request cancelled.")
-                .then(screenService.sendMainMenu(to));
+        messageService.sendTextMessage(to, "Payslip request cancelled.");
+        screenService.sendMainMenu(to);
     }
 
     private void clearPendingDocumentFields(UserSession session) {
@@ -131,4 +139,3 @@ public class PayslipFlowService {
         }
     }
 }
-        
