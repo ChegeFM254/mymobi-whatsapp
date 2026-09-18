@@ -7,10 +7,16 @@ import com.mfstechnologies.mymobi.session.LoanStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
 
 import java.util.Optional;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): every method here used to
+ * return Mono<Void>, chaining follow-up screens with .then() (or
+ * returning Mono.empty() as a no-op duplicate-payment guard). All
+ * converted to plain blocking void methods with sequential statements;
+ * the guard is now a plain early return.
+ */
 @Service
 public class LoanPaymentFlowService {
 
@@ -30,26 +36,29 @@ public class LoanPaymentFlowService {
         this.loanStore = loanStore;
     }
 
-    public Mono<Void> handlePayLoanMenu(String to, UserSession session) {
+    public void handlePayLoanMenu(String to, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"approved".equals(loanOpt.get().getStatus())) {
-            return screenService.sendMainMenu(to);
+            screenService.sendMainMenu(to);
+            return;
         }
 
         Loan loan = loanOpt.get();
         int remaining = loan.getTenureMonths() - loan.getInstallmentsPaid();
         if (remaining <= 0) {
-            return screenService.sendHomeScreen(to, session);
+            screenService.sendHomeScreen(to, session);
+            return;
         }
 
         int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() : 14442;
-        return screenService.sendPayLoanOptions(to, remaining, monthlyInstallment);
+        screenService.sendPayLoanOptions(to, remaining, monthlyInstallment);
     }
 
-    public Mono<Void> handlePayInstallmentsSelect(String to, String installmentsButtonId, UserSession session) {
+    public void handlePayInstallmentsSelect(String to, String installmentsButtonId, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"approved".equals(loanOpt.get().getStatus())) {
-            return screenService.sendHomeScreen(to, session);
+            screenService.sendHomeScreen(to, session);
+            return;
         }
         Loan loan = loanOpt.get();
 
@@ -59,7 +68,8 @@ public class LoanPaymentFlowService {
         if (selected == null || selected < 1 || selected > remaining) {
             log.warn("Invalid installment selection {} for {} (remaining={})", installmentsButtonId, to, remaining);
             int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() : 14442;
-            return screenService.sendPayLoanOptions(to, remaining, monthlyInstallment);
+            screenService.sendPayLoanOptions(to, remaining, monthlyInstallment);
+            return;
         }
 
         session.setPendingPaymentInstallments(selected);
@@ -68,18 +78,20 @@ public class LoanPaymentFlowService {
         int remainingAfter = remaining - selected;
         int remainingBalanceAfter = monthlyInstallment * remainingAfter;
 
-        return screenService.sendPayLoanConfirm(to, selected, total, remainingBalanceAfter, remainingAfter);
+        screenService.sendPayLoanConfirm(to, selected, total, remainingBalanceAfter, remainingAfter);
     }
-    public Mono<Void> handleConfirmPayLoan(String to, UserSession session) {
+
+    public void handleConfirmPayLoan(String to, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"approved".equals(loanOpt.get().getStatus()) || session.getPendingPaymentInstallments() == null) {
             session.setPendingPaymentInstallments(null);
-            return screenService.sendHomeScreen(to, session);
+            screenService.sendHomeScreen(to, session);
+            return;
         }
         Loan loan = loanOpt.get();
 
         if (loan.isPaymentInProgress()) {
-            return Mono.empty();
+            return;
         }
         loan.setPaymentInProgress(true);
 
@@ -102,8 +114,9 @@ public class LoanPaymentFlowService {
                     "Your installment of KES %,d Ref: %s has been paid. Your loan has been fully paid. Thank you for using MyMobi services.",
                     payAmount, loan.getRefNo()
             );
-            return messageService.sendTextMessage(to, message)
-                    .then(screenService.sendHomeScreen(to, session));
+            messageService.sendTextMessage(to, message);
+            screenService.sendHomeScreen(to, session);
+            return;
         }
 
         int remainingInstallments = loan.getTenureMonths() - loan.getInstallmentsPaid();
@@ -112,13 +125,13 @@ public class LoanPaymentFlowService {
                 "Your installment of KES %,d Ref: %s has been paid. You have a loan balance of KES %,d. Thank you for using MyMobi services.",
                 payAmount, loan.getRefNo(), remainingBalance
         );
-        return messageService.sendTextMessage(to, message)
-                .then(screenService.sendMainMenu(to));
+        messageService.sendTextMessage(to, message);
+        screenService.sendMainMenu(to);
     }
 
-    public Mono<Void> handleCancelPayLoan(String to, UserSession session) {
+    public void handleCancelPayLoan(String to, UserSession session) {
         session.setPendingPaymentInstallments(null);
-        return screenService.sendMainMenu(to);
+        screenService.sendMainMenu(to);
     }
 
     private Integer parseInstallmentsCount(String buttonId) {
