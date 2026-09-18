@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -33,6 +32,13 @@ import java.util.concurrent.TimeUnit;
  * This is the largest single flow in the whole application - deliberately
  * given its own dedicated session, following the same incremental,
  * one-flow-at-a-time approach used throughout this rewrite.
+ *
+ * WORKSTREAM B (reactive -> synchronous): every method here used to
+ * return Mono<Void>, chaining follow-up screens with .then(). All
+ * converted to plain blocking void methods with sequential statements.
+ * deliverOtpAfterDelay's error handling changed from .doOnError().
+ * subscribe() to a plain try/catch, since sendTextMessage() now throws
+ * directly instead of carrying errors on a reactive error channel.
  */
 @Service
 public class RegistrationFlowService {
@@ -57,7 +63,7 @@ public class RegistrationFlowService {
 
     public RegistrationFlowService(
             ScreenMessageService screenService,
-            WhatsAppMessageService messageService,
+                    WhatsAppMessageService messageService,
             RegisteredUserStore userStore,
             PasswordEncoder passwordEncoder
     ) {
@@ -69,36 +75,37 @@ public class RegistrationFlowService {
 
     // ==================== ENTRY + OPT-IN ====================
 
-    public Mono<Void> handleRegisterMenu(String to, UserSession session) {
+    public void handleRegisterMenu(String to, UserSession session) {
         boolean alreadyRegistered = userStore.findByPhoneNumber(to)
                 .map(user -> "active".equals(user.getStatus()))
                 .orElse(false);
 
         if (alreadyRegistered) {
-            return messageService.sendTextMessage(to, "You already have an account registered on this number. Please use Log In instead.")
-                    .then(screenService.sendCivilServantsMenu(to));
+            messageService.sendTextMessage(to, "You already have an account registered on this number. Please use Log In instead.");
+            screenService.sendCivilServantsMenu(to);
+            return;
         }
 
         session.setStep("optin");
-        return screenService.sendOptIn(to);
+        screenService.sendOptIn(to);
     }
 
-    public Mono<Void> handleOptInYes(String to, UserSession session) {
+    public void handleOptInYes(String to, UserSession session) {
         session.setStep("tc");
-        return screenService.sendTerms(to);
+        screenService.sendTerms(to);
     }
 
-    public Mono<Void> handleOptInNo(String to, UserSession session) {
-        return screenService.sendWelcome(to);
+    public void handleOptInNo(String to, UserSession session) {
+        screenService.sendWelcome(to);
     }
 
-    public Mono<Void> handleAcceptTerms(String to, UserSession session) {
+    public void handleAcceptTerms(String to, UserSession session) {
         session.setStep("first_name");
-        return messageService.sendTextMessage(to, "Enter First Name");
+        messageService.sendTextMessage(to, "Enter First Name");
     }
 
-    public Mono<Void> handleDeclineTerms(String to, UserSession session) {
-        return screenService.sendWelcome(to);
+    public void handleDeclineTerms(String to, UserSession session) {
+        screenService.sendWelcome(to);
     }
 
     // ==================== KYC FIELD COLLECTION ====================
@@ -107,124 +114,142 @@ public class RegistrationFlowService {
     // The five original fields keep their exact original relative order;
     // only Middle Name and Email Address are newly inserted.
 
-    public Mono<Void> handleFirstName(String to, String text, UserSession session) {
+    public void handleFirstName(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-            return messageService.sendTextMessage(to, "Please enter your First Name.");
+            messageService.sendTextMessage(to, "Please enter your First Name.");
+            return;
         }
         session.setFirstName(text);
         session.setStep("middle_name");
-        return messageService.sendTextMessage(to, "Enter Middle Name");
+        messageService.sendTextMessage(to, "Enter Middle Name");
     }
 
-    public Mono<Void> handleMiddleName(String to, String text, UserSession session) {
+    public void handleMiddleName(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-            return messageService.sendTextMessage(to, "Please enter your Middle Name.");
-        }
+            messageService.sendTextMessage(to, "Please enter your Middle Name.");
+            return;
+                    }
         session.setMiddleName(text);
         session.setStep("last_name");
-        return messageService.sendTextMessage(to, "Enter Last Name");
+        messageService.sendTextMessage(to, "Enter Last Name");
     }
 
-    public Mono<Void> handleLastName(String to, String text, UserSession session) {
+    public void handleLastName(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-            return messageService.sendTextMessage(to, "Please enter your Last Name.");
+            messageService.sendTextMessage(to, "Please enter your Last Name.");
+            return;
         }
         session.setLastName(text);
         session.setStep("email_address");
-        return messageService.sendTextMessage(to, "Enter Email Address");
+        messageService.sendTextMessage(to, "Enter Email Address");
     }
 
-    public Mono<Void> handleEmailAddress(String to, String text, UserSession session) {
+    public void handleEmailAddress(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-            return messageService.sendTextMessage(to, "Please enter your Email Address.");
+            messageService.sendTextMessage(to, "Please enter your Email Address.");
+            return;
         }
         if (!FieldValidators.isValidEmail(text)) {
-            return messageService.sendTextMessage(to, "Please enter a valid Email Address (e.g. name@example.com).");
+            messageService.sendTextMessage(to, "Please enter a valid Email Address (e.g. name@example.com).");
+            return;
         }
         session.setEmailAddress(text);
         session.setStep("upn");
-        return messageService.sendTextMessage(to, "Enter UPN Number");
+        messageService.sendTextMessage(to, "Enter UPN Number");
     }
 
-    public Mono<Void> handleUpnField(String to, String text, UserSession session) {
+    public void handleUpnField(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-            return messageService.sendTextMessage(to, "Please enter your UPN.");
+            messageService.sendTextMessage(to, "Please enter your UPN.");
+            return;
         }
         if (!FieldValidators.isValidUpn(text)) {
-            return messageService.sendTextMessage(to, "UPN should be up to 11 digits and start with 1 or 2. Please try again.");
+            messageService.sendTextMessage(to, "UPN should be up to 11 digits and start with 1 or 2. Please try again.");
+            return;
         }
         session.setUpn(text);
         session.setStep("national_id");
-        return messageService.sendTextMessage(to, "Enter National ID Number");
+        messageService.sendTextMessage(to, "Enter National ID Number");
     }
 
-    public Mono<Void> handleNationalId(String to, String text, UserSession session) {
+    public void handleNationalId(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-            return messageService.sendTextMessage(to, "Please enter your National ID Number.");
+            messageService.sendTextMessage(to, "Please enter your National ID Number.");
+            return;
         }
         if (!FieldValidators.isValidNationalId(text)) {
-            return messageService.sendTextMessage(to, "National ID should be exactly 8 digits and cannot start with 0. Please try again.");
+            messageService.sendTextMessage(to, "National ID should be exactly 8 digits and cannot start with 0. Please try again.");
+            return;
         }
         session.setNationalId(text);
         session.setStep("mobile_number");
-        return messageService.sendTextMessage(to, "Enter Mpesa Mobile Number");
+        messageService.sendTextMessage(to, "Enter Mpesa Mobile Number");
     }
-    public Mono<Void> handleMobileNumber(String to, String text, UserSession session) {
+
+    public void handleMobileNumber(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-            return messageService.sendTextMessage(to, "Please enter your Mobile Number (Mpesa).");
+            messageService.sendTextMessage(to, "Please enter your Mobile Number (Mpesa).");
+            return;
         }
         if (!FieldValidators.isValidMobileNumber(text)) {
-            return messageService.sendTextMessage(to,
-                    "Mobile Number should be 10 digits starting with 0 (e.g. 0722730336) or 12 digits starting with 254 (e.g. 254722730336). Please try again.");
+            messageService.sendTextMessage(to,
+                                    "Mobile Number should be 10 digits starting with 0 (e.g. 0722730336) or 12 digits starting with 254 (e.g. 254722730336). Please try again.");
+            return;
         }
         session.setMobileNumber(text);
-        return screenService.sendConfirmation(to, session);
+        screenService.sendConfirmation(to, session);
     }
 
     // ==================== CONFIRM / EDIT ====================
 
-    public Mono<Void> handleConfirmDetails(String to, UserSession session) {
+    public void handleConfirmDetails(String to, UserSession session) {
         String otp = CodeGenerator.generateFiveDigitCode();
         session.setOtp(otp);
         session.setOtpAttempts(0);
         session.setStep("enter_otp");
 
         deliverOtpAfterDelay(to, otp);
-        return messageService.sendTextMessage(to, "An OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
+        messageService.sendTextMessage(to, "An OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
     }
 
-    public Mono<Void> handleEditDetails(String to, UserSession session) {
-        return screenService.sendEditOptions(to);
+    public void handleEditDetails(String to, UserSession session) {
+        screenService.sendEditOptions(to);
     }
 
-    public Mono<Void> handleExitEdit(String to, UserSession session) {
-        return screenService.sendConfirmation(to, session);
+    public void handleExitEdit(String to, UserSession session) {
+        screenService.sendConfirmation(to, session);
     }
 
-    public Mono<Void> handleEditFieldSelect(String to, String fieldId, UserSession session) {
+    public void handleEditFieldSelect(String to, String fieldId, UserSession session) {
         session.setStep(fieldId);
         String label = EDIT_FIELD_LABELS.getOrDefault(fieldId, "field");
-        return messageService.sendTextMessage(to, "Enter new " + label + ":");
+        messageService.sendTextMessage(to, "Enter new " + label + ":");
     }
-    public Mono<Void> handleEditFieldText(String to, String text, UserSession session) {
+
+    public void handleEditFieldText(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-            return messageService.sendTextMessage(to, "Please enter a valid value.");
+            messageService.sendTextMessage(to, "Please enter a valid value.");
+            return;
         }
 
         String step = session.getStep();
 
         if ("edit_upn".equals(step) && !FieldValidators.isValidUpn(text)) {
-            return messageService.sendTextMessage(to, "UPN should be up to 11 digits and start with 1 or 2. Please try again.");
+            messageService.sendTextMessage(to, "UPN should be up to 11 digits and start with 1 or 2. Please try again.");
+            return;
         }
         if ("edit_nationalid".equals(step) && !FieldValidators.isValidNationalId(text)) {
-            return messageService.sendTextMessage(to, "National ID should be exactly 8 digits and cannot start with 0. Please try again.");
+            messageService.sendTextMessage(to, "National ID should be exactly 8 digits and cannot start with 0. Please try again.");
+            return;
         }
         if ("edit_mobilenumber".equals(step) && !FieldValidators.isValidMobileNumber(text)) {
-            return messageService.sendTextMessage(to,
+            messageService.sendTextMessage(to,
                     "Mobile Number should be 10 digits starting with 0 (e.g. 0722730336) or 12 digits starting with 254 (e.g. 254722730336). Please try again.");
+            return;
         }
         if ("edit_emailaddress".equals(step) && !FieldValidators.isValidEmail(text)) {
-            return messageService.sendTextMessage(to, "Please enter a valid Email Address (e.g. name@example.com).");
+            messageService.sendTextMessage(to, "Please enter a valid Email Address (e.g. name@example.com).");
+            return;
         }
 
         switch (step) {
@@ -233,24 +258,26 @@ public class RegistrationFlowService {
             case "edit_lastname" -> session.setLastName(text);
             case "edit_emailaddress" -> session.setEmailAddress(text);
             case "edit_upn" -> session.setUpn(text);
-            case "edit_nationalid" -> session.setNationalId(text);
+                            case "edit_nationalid" -> session.setNationalId(text);
             case "edit_mobilenumber" -> session.setMobileNumber(text);
             default -> log.warn("Unexpected edit step {} for {}", step, to);
         }
 
-        return screenService.sendConfirmation(to, session);
+        screenService.sendConfirmation(to, session);
     }
 
     // ==================== OTP ====================
 
-    public Mono<Void> handleEnterOtp(String to, String text, UserSession session) {
+    public void handleEnterOtp(String to, String text, UserSession session) {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
-            return messageService.sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
+            messageService.sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
+            return;
         }
 
         if (text.equals(session.getOtp())) {
             session.setStep("enter_new_pin");
-            return messageService.sendTextMessage(to, "Create a new 5-digit PIN for your account.\n\nDo not share this PIN with anyone.");
+            messageService.sendTextMessage(to, "Create a new 5-digit PIN for your account.\n\nDo not share this PIN with anyone.");
+            return;
         }
 
         session.setOtpAttempts(session.getOtpAttempts() + 1);
@@ -258,38 +285,42 @@ public class RegistrationFlowService {
         if (session.getOtpAttempts() >= MAX_OTP_ATTEMPTS) {
             resetRegistrationFields(session);
             session.setStep("welcome");
-            return messageService.sendTextMessage(to, "Too many incorrect attempts. Your registration has been cancelled. Please try again.")
-                    .then(screenService.sendWelcome(to));
+            messageService.sendTextMessage(to, "Too many incorrect attempts. Your registration has been cancelled. Please try again.");
+            screenService.sendWelcome(to);
+            return;
         }
 
         int attemptsLeft = MAX_OTP_ATTEMPTS - session.getOtpAttempts();
-        return messageService.sendTextMessage(to, "Incorrect OTP. You have " + attemptsLeft + " attempt(s) remaining.");
+        messageService.sendTextMessage(to, "Incorrect OTP. You have " + attemptsLeft + " attempt(s) remaining.");
     }
 
     // ==================== NEW PIN SETUP ====================
-public Mono<Void> handleEnterNewPin(String to, String text, UserSession session) {
+
+    public void handleEnterNewPin(String to, String text, UserSession session) {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
-            return messageService.sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+            messageService.sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+            return;
         }
         if (text.equals(session.getOtp())) {
-            return messageService.sendTextMessage(to, "Your new PIN cannot be the same as the OTP. Please choose a different 5-digit PIN.");
+            messageService.sendTextMessage(to, "Your new PIN cannot be the same as the OTP. Please choose a different 5-digit PIN.");
+            return;
         }
 
         session.setNewPin(text);
         session.setStep("confirm_new_pin");
-        return messageService.sendTextMessage(to, "Please re-enter your new 5-digit PIN to confirm.");
+        messageService.sendTextMessage(to, "Please re-enter your new 5-digit PIN to confirm.");
     }
 
-    public Mono<Void> handleConfirmNewPin(String to, String text, UserSession session) {
+    public void handleConfirmNewPin(String to, String text, UserSession session) {
         if (!text.equals(session.getNewPin())) {
             session.setStep("enter_new_pin");
-            return messageService.sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
+            messageService.sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
+            return;
         }
-
-        return completeRegistration(to, session);
+                completeRegistration(to, session);
     }
 
-    private Mono<Void> completeRegistration(String to, UserSession session) {
+    private void completeRegistration(String to, UserSession session) {
         RegisteredUser user = new RegisteredUser();
         user.setFirstName(session.getFirstName());
         user.setMiddleName(session.getMiddleName());
@@ -307,15 +338,15 @@ public Mono<Void> handleEnterNewPin(String to, String text, UserSession session)
         resetRegistrationFields(session);
         session.setAuthenticated(true);
 
-        return messageService.sendTextMessage(to,
-                        "\uD83C\uDF89 Registration Complete!\n\n" +
-                        "Your account has been successfully set up.\n\n" +
-                        "\uD83D\uDD12 Security Notice:\n" +
-                        "\u2022 Your PIN is now active\n" +
-                        "\u2022 Do not share this PIN with anyone\n" +
-                        "\u2022 For your protection, we strongly recommend deleting this chat or the messages containing your PIN"
-                )
-                .then(screenService.sendWelcome(to));
+        messageService.sendTextMessage(to,
+                "\uD83C\uDF89 Registration Complete!\n\n" +
+                "Your account has been successfully set up.\n\n" +
+                "\uD83D\uDD12 Security Notice:\n" +
+                "\u2022 Your PIN is now active\n" +
+                "\u2022 Do not share this PIN with anyone\n" +
+                "\u2022 For your protection, we strongly recommend deleting this chat or the messages containing your PIN"
+        );
+        screenService.sendWelcome(to);
     }
 
     private void resetRegistrationFields(UserSession session) {
@@ -332,9 +363,13 @@ public Mono<Void> handleEnterNewPin(String to, String text, UserSession session)
      */
     private void deliverOtpAfterDelay(String to, String otp) {
         CompletableFuture.runAsync(
-                () -> messageService.sendTextMessage(to, "OTP " + otp)
-                        .doOnError(err -> log.error("Failed to deliver simulated OTP to {}: {}", to, err.getMessage()))
-                        .subscribe(),
+                () -> {
+                    try {
+                        messageService.sendTextMessage(to, "OTP " + otp);
+                    } catch (Exception err) {
+                        log.error("Failed to deliver simulated OTP to {}: {}", to, err.getMessage());
+                    }
+                },
                 CompletableFuture.delayedExecutor(5, TimeUnit.SECONDS)
         );
     }
