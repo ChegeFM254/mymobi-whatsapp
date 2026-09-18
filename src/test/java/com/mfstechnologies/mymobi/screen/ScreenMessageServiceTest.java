@@ -10,7 +10,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import reactor.core.publisher.Mono;
 
 import java.util.List;
 import java.util.Map;
@@ -18,14 +17,21 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * Covers the Main Menu's dynamic loan-action row - the old, separate
  * "Emergency Loan" submenu was collapsed directly into this screen, so
  * the correct Apply/Approve/Pay (plus Cancel Loan alongside Approve) row
  * combination needs direct verification here.
+ *
+ * WORKSTREAM B (reactive -> synchronous): rewritten for the now-void
+ * ScreenMessageService methods. No more .block() calls anywhere - every
+ * screenService.sendXxx(...) call is already synchronous. The capture
+ * stub also changed: sendMessage() is now void, so it's stubbed with
+ * doNothing().when(...) rather than when(...).thenReturn(...), which
+ * only works for non-void methods.
  */
 @ExtendWith(MockitoExtension.class)
 class ScreenMessageServiceTest {
@@ -47,7 +53,7 @@ class ScreenMessageServiceTest {
         loanStore = new LoanStore();
         userStore = new com.mfstechnologies.mymobi.session.RegisteredUserStore();
         screenService = new ScreenMessageService(messageService, loanStore, userStore);
-        when(messageService.sendMessage(eq(FROM), payloadCaptor.capture())).thenReturn(Mono.empty());
+        doNothing().when(messageService).sendMessage(eq(FROM), payloadCaptor.capture());
     }
 
     @SuppressWarnings("unchecked")
@@ -57,7 +63,7 @@ class ScreenMessageServiceTest {
         Map<String, Object> action = (Map<String, Object>) interactive.get("action");
         List<Map<String, Object>> sections = (List<Map<String, Object>>) action.get("sections");
         List<Map<String, Object>> rows = (List<Map<String, Object>>) sections.get(0).get("rows");
-        return rows.stream().map(row -> (String) row.get("id")).toList();
+                return rows.stream().map(row -> (String) row.get("id")).toList();
     }
 
     @SuppressWarnings("unchecked")
@@ -82,9 +88,10 @@ class ScreenMessageServiceTest {
         Map<String, Object> interactive = (Map<String, Object>) payload.get("interactive");
         return interactive.containsKey("footer");
     }
+
     @Test
     void showsApplyLoanWhenThereIsNoLoan() {
-        screenService.sendMainMenu(FROM).block();
+        screenService.sendMainMenu(FROM);
 
         assertThat(capturedRowIds()).startsWith("apply_loan");
     }
@@ -95,7 +102,7 @@ class ScreenMessageServiceTest {
         loan.setStatus("pending_approval");
         loanStore.save(FROM, loan);
 
-        screenService.sendMainMenu(FROM).block();
+        screenService.sendMainMenu(FROM);
 
         List<String> rowIds = capturedRowIds();
         assertThat(rowIds).containsSubsequence("approve_loan_menu", "cancel_loan");
@@ -107,7 +114,7 @@ class ScreenMessageServiceTest {
         loan.setStatus("approved");
         loanStore.save(FROM, loan);
 
-        screenService.sendMainMenu(FROM).block();
+        screenService.sendMainMenu(FROM);
 
         assertThat(capturedRowIds()).startsWith("pay_loan_menu");
     }
@@ -118,15 +125,15 @@ class ScreenMessageServiceTest {
         loan.setStatus("paid");
         loanStore.save(FROM, loan);
 
-        screenService.sendMainMenu(FROM).block();
+        screenService.sendMainMenu(FROM);
 
         assertThat(capturedRowIds()).startsWith("apply_loan");
     }
 
     @Test
     void alwaysIncludesTheStandardNavigationRows() {
-        screenService.sendMainMenu(FROM).block();
-
+        screenService.sendMainMenu(FROM);
+        
         List<String> rowIds = capturedRowIds();
         assertThat(rowIds).contains("payslip_menu", "loan_statement_menu", "loan_clearance_menu", "back", "home", "logout");
     }
@@ -138,7 +145,7 @@ class ScreenMessageServiceTest {
         com.mfstechnologies.mymobi.model.UserSession session = new com.mfstechnologies.mymobi.model.UserSession();
         session.setAuthenticated(true);
 
-        screenService.sendHomeScreen(FROM, session).block();
+        screenService.sendHomeScreen(FROM, session);
 
         // Main Menu specifically has these rows; Welcome does not.
         assertThat(capturedRowIds()).contains("payslip_menu", "loan_statement_menu");
@@ -148,7 +155,7 @@ class ScreenMessageServiceTest {
     void homeScreenShowsWelcomeWhenNotAuthenticated() {
         com.mfstechnologies.mymobi.model.UserSession session = new com.mfstechnologies.mymobi.model.UserSession(); // authenticated=false by default
 
-        screenService.sendHomeScreen(FROM, session).block();
+        screenService.sendHomeScreen(FROM, session);
 
         // Welcome specifically has these rows; Main Menu does not.
         assertThat(capturedRowIds()).contains("civil_servants", "buy_airtime");
@@ -156,7 +163,7 @@ class ScreenMessageServiceTest {
 
     @Test
     void homeScreenShowsWelcomeWhenSessionIsNull() {
-        screenService.sendHomeScreen(FROM, null).block();
+        screenService.sendHomeScreen(FROM, null);
 
         assertThat(capturedRowIds()).contains("civil_servants", "buy_airtime");
     }
@@ -167,7 +174,7 @@ class ScreenMessageServiceTest {
     void loanBreakdownMatchesTheExactRequestedWording() {
         var breakdown = new com.mfstechnologies.mymobi.model.LoanBreakdown(60000, 6842, 53158, 24500, 450);
 
-        screenService.sendLoanBreakdown(FROM, breakdown, 3).block();
+        screenService.sendLoanBreakdown(FROM, breakdown, 3);
 
         assertThat(capturedBodyText()).isEqualTo(
                 "Loan Amount: KES 60,000\n" +
@@ -185,7 +192,7 @@ class ScreenMessageServiceTest {
     void loanBreakdownUsesSingularMonthForATenureOfOne() {
         var breakdown = new com.mfstechnologies.mymobi.model.LoanBreakdown(20000, 2000, 18000, 20000, 150);
 
-        screenService.sendLoanBreakdown(FROM, breakdown, 1).block();
+        screenService.sendLoanBreakdown(FROM, breakdown, 1);
 
         assertThat(capturedBodyText()).contains("Loan Period: 1 Month\n");
         assertThat(capturedBodyText()).doesNotContain("1 Months");
@@ -196,13 +203,13 @@ class ScreenMessageServiceTest {
     @Test
     void approveLoanDetailsMatchesTheExactRequestedWording() {
         Loan loan = new Loan();
-        loan.setLoanAmount(60000);
+                loan.setLoanAmount(60000);
         loan.setTenureMonths(3);
         loan.setDueDate("2026-10-23");
         loan.setStatus("pending_approval");
         loan.setBreakdown(new com.mfstechnologies.mymobi.model.LoanBreakdown(60000, 6842, 53158, 24500, 450));
 
-        screenService.sendApproveLoanDetails(FROM, loan).block();
+        screenService.sendApproveLoanDetails(FROM, loan);
 
         assertThat(capturedBodyText()).isEqualTo(
                 "Loan Amount: KES 60,000\n" +
@@ -227,7 +234,7 @@ class ScreenMessageServiceTest {
         loan.setStatus("cancelled"); // deliberately NOT pending_approval
         loan.setBreakdown(new com.mfstechnologies.mymobi.model.LoanBreakdown(20000, 2000, 18000, 20000, 150));
 
-        screenService.sendApproveLoanDetails(FROM, loan).block();
+        screenService.sendApproveLoanDetails(FROM, loan);
 
         assertThat(capturedBodyText()).contains("Status: Cancelled");
         assertThat(capturedBodyText()).doesNotContain("Pending Approval");
@@ -241,7 +248,7 @@ class ScreenMessageServiceTest {
         user.setFirstName("John");
         userStore.save(FROM, user);
 
-        screenService.sendWelcome(FROM).block();
+        screenService.sendWelcome(FROM);
 
         assertThat(capturedHeaderText()).isEqualTo("Hello John, Welcome to MyMobi [Java]");
         // No footer on this screen at all, personalized or not - "MyMobi
@@ -252,11 +259,11 @@ class ScreenMessageServiceTest {
 
     @Test
     void welcomeUsesGenericGreetingWhenNoRegisteredUserExists() {
-        screenService.sendWelcome(FROM).block();
+        screenService.sendWelcome(FROM);
 
         assertThat(capturedHeaderText()).isEqualTo("Welcome to MyMobi [Java]");
         assertThat(capturedHasFooter()).isFalse();
-    }
+            }
 
     // ==================== sendConfirmation ====================
 
@@ -271,7 +278,7 @@ class ScreenMessageServiceTest {
         session.setNationalId("87654321");
         session.setMobileNumber("0722730336");
 
-        screenService.sendConfirmation(FROM, session).block();
+        screenService.sendConfirmation(FROM, session);
 
         String body = capturedBodyText();
         assertThat(body).contains("First Name: Jane");
@@ -304,7 +311,7 @@ class ScreenMessageServiceTest {
 
     @Test
     void editOptionsIncludesAllSevenFieldsPlusExit() {
-        screenService.sendEditOptions(FROM).block();
+        screenService.sendEditOptions(FROM);
 
         assertThat(capturedRowIds()).containsExactly(
                 "edit_firstname", "edit_middlename", "edit_lastname",
