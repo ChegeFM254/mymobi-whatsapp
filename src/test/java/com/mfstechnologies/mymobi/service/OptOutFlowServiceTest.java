@@ -11,13 +11,17 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import reactor.core.publisher.Mono;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): rewritten for the now-void
+ * OptOutFlowService methods. No more .block() calls or Mono.empty()
+ * stubs anywhere.
+ */
 @ExtendWith(MockitoExtension.class)
 class OptOutFlowServiceTest {
 
@@ -43,10 +47,8 @@ class OptOutFlowServiceTest {
     @Test
     void noAccountFoundReturnsAHelpfulMessage() {
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendCivilServantsMenu(FROM)).thenReturn(Mono.empty());
 
-        optOutFlowService.handleOptOut(FROM, session).block();
+        optOutFlowService.handleOptOut(FROM, session);
 
         verify(screenService).sendCivilServantsMenu(FROM);
     }
@@ -55,9 +57,8 @@ class OptOutFlowServiceTest {
     void existingAccountMovesToConfirmationStep() {
         userStore.save(FROM, new RegisteredUser());
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        optOutFlowService.handleOptOut(FROM, session).block();
+        optOutFlowService.handleOptOut(FROM, session);
 
         assertThat(session.getStep()).isEqualTo("opt_out_confirmation");
     }
@@ -65,9 +66,8 @@ class OptOutFlowServiceTest {
     @Test
     void confirmingYesMovesToPinStep() {
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        optOutFlowService.handleOptOutConfirmation(FROM, "yes", session).block();
+        optOutFlowService.handleOptOutConfirmation(FROM, "yes", session);
 
         assertThat(session.getStep()).isEqualTo("opt_out_pin");
     }
@@ -75,9 +75,8 @@ class OptOutFlowServiceTest {
     @Test
     void confirmingNoCancelsAndReturnsToCivilServantsMenu() {
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendCivilServantsMenu(FROM)).thenReturn(Mono.empty());
-        optOutFlowService.handleOptOutConfirmation(FROM, "no", session).block();
+
+        optOutFlowService.handleOptOutConfirmation(FROM, "no", session);
 
         verify(screenService).sendCivilServantsMenu(FROM);
     }
@@ -85,9 +84,8 @@ class OptOutFlowServiceTest {
     @Test
     void ambiguousConfirmationTextRepromptsWithoutAdvancing() {
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        optOutFlowService.handleOptOutConfirmation(FROM, "maybe", session).block();
+        optOutFlowService.handleOptOutConfirmation(FROM, "maybe", session);
 
         assertThat(session.getStep()).isNotEqualTo("opt_out_pin");
         verify(screenService, never()).sendCivilServantsMenu(anyString());
@@ -103,9 +101,8 @@ class OptOutFlowServiceTest {
 
         UserSession session = new UserSession();
         session.setAuthenticated(true);
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        optOutFlowService.handleOptOutPin(FROM, "11111", session).block();
+        optOutFlowService.handleOptOutPin(FROM, "11111", session);
 
         // Data protection: the record is genuinely gone, not just
         // marked - findByPhoneNumber must come back completely empty,
@@ -129,9 +126,8 @@ class OptOutFlowServiceTest {
         userStore.save(FROM, existing);
 
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        optOutFlowService.handleOptOutPin(FROM, "11111", session).block();
+        optOutFlowService.handleOptOutPin(FROM, "11111", session);
 
         // A later Welcome screen for this number must show the generic
         // greeting, never the old name - proving the data is genuinely
@@ -147,10 +143,8 @@ class OptOutFlowServiceTest {
         userStore.save(FROM, existing);
 
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendCivilServantsMenu(FROM)).thenReturn(Mono.empty());
 
-        optOutFlowService.handleOptOutPin(FROM, "00000", session).block();
+        optOutFlowService.handleOptOutPin(FROM, "00000", session);
 
         assertThat(userStore.findByPhoneNumber(FROM).get().getStatus()).isEqualTo("active"); // unchanged
         verify(screenService).sendCivilServantsMenu(FROM);
