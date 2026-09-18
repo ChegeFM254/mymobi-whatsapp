@@ -9,7 +9,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import reactor.core.publisher.Mono;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -17,6 +16,15 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): rewritten for the now-void
+ * AuthenticationFlowService methods. No more .block() calls, and no
+ * more when(...).thenReturn(Mono.empty()) stubs - since every mocked
+ * dependency here (ScreenMessageService, WhatsAppMessageService) is
+ * itself already void, Mockito's default no-op behavior for void
+ * methods means no stubbing is needed at all; verify(...) still checks
+ * the calls happened exactly as before.
+ */
 @ExtendWith(MockitoExtension.class)
 class AuthenticationFlowServiceTest {
 
@@ -49,9 +57,8 @@ class AuthenticationFlowServiceTest {
     void authenticatedSessionGoesStraightToMainMenu() {
         UserSession session = new UserSession();
         session.setAuthenticated(true);
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        authFlowService.handleCivilServants(FROM, session).block();
+        authFlowService.handleCivilServants(FROM, session);
 
         verify(screenService).sendMainMenu(FROM);
         verify(screenService, never()).sendCivilServantsMenu(anyString());
@@ -60,9 +67,7 @@ class AuthenticationFlowServiceTest {
     @Test
     void unauthenticatedSessionSeesTheCivilServantsMenu() {
         UserSession session = new UserSession();
-        when(screenService.sendCivilServantsMenu(FROM)).thenReturn(Mono.empty());
-
-        authFlowService.handleCivilServants(FROM, session).block();
+                authFlowService.handleCivilServants(FROM, session);
 
         verify(screenService).sendCivilServantsMenu(FROM);
         verify(screenService, never()).sendMainMenu(anyString());
@@ -71,20 +76,19 @@ class AuthenticationFlowServiceTest {
     @Test
     void loginMenuPromptsForUpnWhenNotLockedOut() {
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        authFlowService.handleLoginMenu(FROM, session).block();
+        authFlowService.handleLoginMenu(FROM, session);
 
         assertThat(session.getStep()).isEqualTo("login_enter_upn");
         verify(messageService).sendTextMessage(FROM, "Enter UPN:");
     }
+
     @Test
     void loginMenuRefusesToProceedWhileLockedOut() {
         lockoutService.applyLockout(FROM);
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        authFlowService.handleLoginMenu(FROM, session).block();
+        authFlowService.handleLoginMenu(FROM, session);
 
         assertThat(session.getStep()).isNotEqualTo("login_enter_upn");
         verify(messageService).sendTextMessage(eq(FROM), contains("temporarily locked"));
@@ -94,9 +98,8 @@ class AuthenticationFlowServiceTest {
     void invalidUpnFormatIsRejectedWithoutAdvancingTheStep() {
         UserSession session = new UserSession();
         session.setStep("login_enter_upn");
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        authFlowService.handleLoginEnterUpn(FROM, "notanumber", session).block();
+        authFlowService.handleLoginEnterUpn(FROM, "notanumber", session);
 
         assertThat(session.getStep()).isEqualTo("login_enter_upn");
         verify(messageService).sendTextMessage(eq(FROM), contains("UPN"));
@@ -106,9 +109,8 @@ class AuthenticationFlowServiceTest {
     void validUpnAdvancesToPinStep() {
         UserSession session = new UserSession();
         session.setStep("login_enter_upn");
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        authFlowService.handleLoginEnterUpn(FROM, "12345", session).block();
+        authFlowService.handleLoginEnterUpn(FROM, "12345", session);
 
         assertThat(session.getStep()).isEqualTo("login_enter_pin");
         assertThat(session.getLoginUpn()).isEqualTo("12345");
@@ -120,14 +122,14 @@ class AuthenticationFlowServiceTest {
         UserSession session = new UserSession();
         session.setStep("login_enter_pin");
         session.setLoginUpn("12345");
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        authFlowService.handleLoginEnterPin(FROM, "54321", session).block();
+        authFlowService.handleLoginEnterPin(FROM, "54321", session);
 
         assertThat(session.getStep()).isEqualTo("login_enter_verification_code");
         assertThat(session.getVerificationCode()).isNotNull();
         verify(messageService).sendTextMessage(FROM, "Enter Verification Code:");
     }
+
     @Test
     void wrongPinAgainstARealRecordIncrementsAttemptsWithoutLockingOutImmediately() {
         var realUser = new com.mfstechnologies.mymobi.model.RegisteredUser();
@@ -135,15 +137,14 @@ class AuthenticationFlowServiceTest {
         realUser.setHashedPin(new BCryptPasswordEncoder().encode("11111"));
         var userStore = new com.mfstechnologies.mymobi.session.RegisteredUserStore();
         userStore.save(FROM, realUser);
-        var realLoginService = new LoginVerificationService(userStore, new BCryptPasswordEncoder(), true);
+                var realLoginService = new LoginVerificationService(userStore, new BCryptPasswordEncoder(), true);
         var flowWithRealUser = new AuthenticationFlowService(screenService, messageService, lockoutService, realLoginService, inactivityTimeoutService);
 
         UserSession session = new UserSession();
         session.setStep("login_enter_pin");
         session.setLoginUpn("19999999");
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        flowWithRealUser.handleLoginEnterPin(FROM, "00000", session).block();
+        flowWithRealUser.handleLoginEnterPin(FROM, "00000", session);
 
         assertThat(session.getLoginAttempts()).isEqualTo(1);
         assertThat(session.getStep()).isEqualTo("login_enter_pin");
@@ -164,23 +165,21 @@ class AuthenticationFlowServiceTest {
         session.setStep("login_enter_pin");
         session.setLoginUpn("19999999");
         session.setLoginAttempts(2);
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
 
-        flowWithRealUser.handleLoginEnterPin(FROM, "00000", session).block();
+        flowWithRealUser.handleLoginEnterPin(FROM, "00000", session);
 
         assertThat(lockoutService.getLockoutMinutesRemaining(FROM)).isGreaterThan(0);
         verify(messageService).sendTextMessage(eq(FROM), contains("locked for 10 minutes"));
         verify(screenService).sendHomeScreen(FROM, session);
     }
+
     @Test
     void correctVerificationCodeCompletesLoginAndShowsWelcomeScreen() {
         UserSession session = new UserSession();
         session.setStep("login_enter_verification_code");
         session.setVerificationCode("98765");
-        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
-        authFlowService.handleLoginEnterVerificationCode(FROM, "98765", session).block();
+        authFlowService.handleLoginEnterVerificationCode(FROM, "98765", session);
 
         assertThat(session.isAuthenticated()).isTrue();
         assertThat(session.getVerificationCode()).isNull(); // cleared after use
@@ -192,9 +191,8 @@ class AuthenticationFlowServiceTest {
         UserSession session = new UserSession();
         session.setStep("login_enter_verification_code");
         session.setVerificationCode("98765");
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        authFlowService.handleLoginEnterVerificationCode(FROM, "00000", session).block();
+        authFlowService.handleLoginEnterVerificationCode(FROM, "00000", session);
 
         assertThat(session.isAuthenticated()).isFalse();
         verify(screenService, never()).sendMainMenu(anyString());
@@ -204,7 +202,7 @@ class AuthenticationFlowServiceTest {
     void logoutCancelsThePendingInactivityTimeoutImmediately() {
         UserSession session = new UserSession();
 
-        authFlowService.handleLogout(FROM, session).block();
+        authFlowService.handleLogout(FROM, session);
 
         verify(inactivityTimeoutService).cancelTimeout(FROM);
     }
