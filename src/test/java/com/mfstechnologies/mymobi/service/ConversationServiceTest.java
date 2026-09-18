@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 
@@ -18,6 +17,11 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): rewritten for the now-void
+ * ConversationService methods. No more .block() calls or Mono.empty()
+ * stubs anywhere.
+ */
 @ExtendWith(MockitoExtension.class)
 class ConversationServiceTest {
 
@@ -54,7 +58,7 @@ class ConversationServiceTest {
 
     @BeforeEach
     void setUp() {
-        conversationService = new ConversationService(
+                conversationService = new ConversationService(
                 sessionStore, screenService, messageService,
                 authFlowService, registrationFlowService,
                 forgotPinFlowService, optOutFlowService,
@@ -68,11 +72,10 @@ class ConversationServiceTest {
     void freshSessionWithTriggerWordSendsWelcomeAndMarksSessionNoLongerNew() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.1", FROM, "hi", null);
 
-        conversationService.handleIncomingMessage(message).block();
+        conversationService.handleIncomingMessage(message);
 
         verify(screenService).sendWelcome(FROM);
         assertThat(session.isNewSession()).isFalse();
@@ -86,7 +89,7 @@ class ConversationServiceTest {
 
         IncomingMessage message = new IncomingMessage("wamid.2", FROM, "hi", null);
 
-        conversationService.handleIncomingMessage(message).block();
+        conversationService.handleIncomingMessage(message);
 
         verifyNoInteractions(screenService);
         verify(messageService, never()).sendTextMessage(anyString(), anyString());
@@ -96,36 +99,34 @@ class ConversationServiceTest {
     void loanStatementMenuButtonRoutesToLoanDocumentFlowService() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(loanDocumentFlowService.handleLoanStatementMenu(FROM, session)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.3", FROM, null, "loan_statement_menu");
 
-        conversationService.handleIncomingMessage(message).block();
+        conversationService.handleIncomingMessage(message);
 
         verify(loanDocumentFlowService).handleLoanStatementMenu(FROM, session);
     }
+
     @Test
     void loanClearanceMenuButtonRoutesToLoanDocumentFlowService() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(loanDocumentFlowService.handleLoanClearanceMenu(FROM, session)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.4", FROM, null, "loan_clearance_menu");
 
-        conversationService.handleIncomingMessage(message).block();
+        conversationService.handleIncomingMessage(message);
 
         verify(loanDocumentFlowService).handleLoanClearanceMenu(FROM, session);
     }
-
+    
     @Test
     void payslipMenuButtonRoutesToPayslipFlowService() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(payslipFlowService.handlePayslipMenu(FROM, session)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.5", FROM, null, "payslip_menu");
 
-        conversationService.handleIncomingMessage(message).block();
+        conversationService.handleIncomingMessage(message);
 
         verify(payslipFlowService).handlePayslipMenu(FROM, session);
     }
@@ -134,12 +135,10 @@ class ConversationServiceTest {
     void unmappedButtonTapsShowNodeMatchingFallbackAndReturnHome() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.6", FROM, null, "some_unported_button");
 
-        conversationService.handleIncomingMessage(message).block();
+        conversationService.handleIncomingMessage(message);
 
         verify(messageService).sendTextMessage(eq(FROM),
                 eq("Sorry, I didn't understand that option. Returning to the main menu."));
@@ -155,29 +154,25 @@ class ConversationServiceTest {
         session.setAuthenticated(true);
         session.setStep("some_stale_unrecognized_step");
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.10", FROM, "gibberish", null);
 
-        conversationService.handleIncomingMessage(message).block();
+        conversationService.handleIncomingMessage(message);
 
         verify(messageService).sendTextMessage(eq(FROM), eq("Sorry, something went wrong. Let's start over."));
         verify(screenService).sendHomeScreen(FROM, session);
         assertThat(session.getStep()).isEqualTo("welcome");
         assertThat(session.getCurrentMenu()).isNull();
     }
+
     @Test
     void unmappedTextStepWhenNotAuthenticatedShowsWelcomeAndDropsSession() {
         UserSession session = new UserSession(); // authenticated=false
         session.setStep("some_stale_unrecognized_step");
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.11", FROM, "gibberish", null);
-
-        conversationService.handleIncomingMessage(message).block();
+                conversationService.handleIncomingMessage(message);
 
         verify(messageService).sendTextMessage(eq(FROM), eq("Sorry, something went wrong. Let's start over."));
         verify(screenService).sendWelcome(FROM);
@@ -188,11 +183,10 @@ class ConversationServiceTest {
     void resetSendTurnIsAlwaysCalledBeforeAnyReply() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.7", FROM, "hi", null);
 
-        conversationService.handleIncomingMessage(message).block();
+        conversationService.handleIncomingMessage(message);
 
         verify(messageService).resetSendTurn(FROM);
     }
@@ -201,11 +195,10 @@ class ConversationServiceTest {
     void inactivityTimeoutIsResetOnEveryIncomingMessage() {
         UserSession session = new UserSession();
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.8", FROM, "hi", null);
 
-        conversationService.handleIncomingMessage(message).block();
+        conversationService.handleIncomingMessage(message);
 
         verify(inactivityTimeoutService).resetTimeout(FROM);
     }
@@ -215,11 +208,10 @@ class ConversationServiceTest {
         UserSession session = new UserSession();
         session.setAuthenticated(true);
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
-        when(screenService.sendWelcome(FROM)).thenReturn(Mono.empty());
 
         IncomingMessage message = new IncomingMessage("wamid.9", FROM, null, "home");
 
-        conversationService.handleIncomingMessage(message).block();
+        conversationService.handleIncomingMessage(message);
 
         // Deliberate product decision: Home is always a full reset to
         // Welcome, distinct from Back which stays contextual - even for
