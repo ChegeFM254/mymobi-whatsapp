@@ -12,12 +12,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import reactor.core.publisher.Mono;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): rewritten for the now-void
+ * PayslipFlowService methods. No more .block() calls or Mono.empty()
+ * stubs anywhere.
+ */
 @ExtendWith(MockitoExtension.class)
 class PayslipFlowServiceTest {
 
@@ -48,9 +52,8 @@ class PayslipFlowServiceTest {
     @Test
     void payslipMenuPromptsForMonths() {
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        payslipFlow.handlePayslipMenu(FROM, session).block();
+        payslipFlow.handlePayslipMenu(FROM, session);
 
         assertThat(session.getStep()).isEqualTo("enter_payslip_months");
     }
@@ -58,9 +61,8 @@ class PayslipFlowServiceTest {
     @Test
     void payslipMenuShowsThePerMonthPriceUpfront() {
         UserSession session = new UserSession();
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
 
-        payslipFlow.handlePayslipMenu(FROM, session).block();
+        payslipFlow.handlePayslipMenu(FROM, session);
 
         verify(messageService).sendTextMessage(eq(FROM),
                 eq("Payslip for each month costs KES 23.20. Enter the number of months (1-12):"));
@@ -69,14 +71,14 @@ class PayslipFlowServiceTest {
     @Test
     void validMonthsShowsConfirmationWithCorrectCost() {
         UserSession session = new UserSession();
-        when(screenService.sendPayslipConfirm(FROM, 3, 69.60)).thenReturn(Mono.empty());
 
-        payslipFlow.handleEnterPayslipMonths(FROM, "3", session).block();
+        payslipFlow.handleEnterPayslipMonths(FROM, "3", session);
 
         assertThat(session.getPendingDocumentMonths()).isEqualTo(3);
         assertThat(session.getStep()).isEqualTo("confirm_payslip");
         verify(screenService).sendPayslipConfirm(FROM, 3, 69.60);
     }
+
     @Test
     void confirmingSendsStkPushPromptBeforeGeneratingTheDocument() {
         RegisteredUser user = new RegisteredUser();
@@ -87,10 +89,8 @@ class PayslipFlowServiceTest {
 
         UserSession session = new UserSession();
         session.setPendingDocumentMonths(3); // cost = 23.20 * 3 = 69.60
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        payslipFlow.handleConfirmPayslip(FROM, session).block();
+        payslipFlow.handleConfirmPayslip(FROM, session);
 
         verify(messageService).sendTextMessage(eq(FROM),
                 eq("You are about to pay KES 69.60 to MyMobi account XXXXX. Please enter your Mpesa PIN."));
@@ -106,10 +106,8 @@ class PayslipFlowServiceTest {
 
         UserSession session = new UserSession();
         session.setPendingDocumentMonths(2);
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        payslipFlow.handleConfirmPayslip(FROM, session).block();
+        payslipFlow.handleConfirmPayslip(FROM, session);
 
         assertThat(session.getPendingDocumentMonths()).isNull(); // cleared after use
         verify(messageService).sendTextMessage(eq(FROM),
@@ -121,10 +119,8 @@ class PayslipFlowServiceTest {
     void cancelingClearsPendingFieldsAndReturnsToMainMenu() {
         UserSession session = new UserSession();
         session.setPendingDocumentMonths(3);
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        payslipFlow.handleCancelPayslip(FROM, session).block();
+        payslipFlow.handleCancelPayslip(FROM, session);
 
         assertThat(session.getPendingDocumentMonths()).isNull();
         verify(screenService).sendMainMenu(FROM);
