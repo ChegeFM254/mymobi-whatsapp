@@ -14,11 +14,17 @@ import com.mfstechnologies.mymobi.validation.CodeGenerator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.Optional;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): every method here used to
+ * return Mono<Void>, chaining follow-up steps with .then() - including
+ * Mono.defer(...) wrapping the simulated STK push and document
+ * generation. All converted to plain blocking void methods with
+ * sequential statements; the defer wrapper is simply gone.
+ */
 @Service
 public class LoanDocumentFlowService {
 
@@ -53,93 +59,96 @@ public class LoanDocumentFlowService {
 
     // ==================== LOAN STATEMENT ====================
 
-    public Mono<Void> handleLoanStatementMenu(String to, UserSession session) {
+    public void handleLoanStatementMenu(String to, UserSession session) {
         if (loanStore.findByPhoneNumber(to).isEmpty()) {
-            return messageService.sendTextMessage(to, "You have no loan on record.")
-                    .then(screenService.sendMainMenu(to));
+            messageService.sendTextMessage(to, "You have no loan on record.");
+            screenService.sendMainMenu(to);
+            return;
         }
 
         session.setPendingDocumentType("loan_statement");
-        return screenService.sendLoanStatementConfirm(to, DOCUMENT_COST);
+        screenService.sendLoanStatementConfirm(to, DOCUMENT_COST);
     }
 
-    public Mono<Void> handleConfirmLoanStatement(String to, UserSession session) {
+    public void handleConfirmLoanStatement(String to, UserSession session) {
         Optional<RegisteredUser> userOpt = userStore.findByPhoneNumber(to);
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
 
         if (userOpt.isEmpty() || loanOpt.isEmpty()) {
             session.setPendingDocumentType(null);
-            return messageService.sendTextMessage(to, "Something went wrong. Please try again.")
-                    .then(screenService.sendMainMenu(to));
+            messageService.sendTextMessage(to, "Something went wrong. Please try again.");
+            screenService.sendMainMenu(to);
+            return;
         }
         RegisteredUser user = userOpt.get();
         Loan loan = loanOpt.get();
+                sendStkPushPrompt(to, DOCUMENT_COST);
 
-        return sendStkPushPrompt(to, DOCUMENT_COST)
-                .then(Mono.defer(() -> {
-                    log.info("mpesa_stk_push_simulated to={} purpose=loan_statement", to);
-                    String html = documentHtmlService.generateLoanStatementHtml(user, loan);
-                    return generateAndSendDocumentLink(to, "loan_statement", "Loan Statement", user.getUpn(), html, session);
-                }));
+        log.info("mpesa_stk_push_simulated to={} purpose=loan_statement", to);
+        String html = documentHtmlService.generateLoanStatementHtml(user, loan);
+        generateAndSendDocumentLink(to, "loan_statement", "Loan Statement", user.getUpn(), html, session);
     }
 
-    public Mono<Void> handleCancelLoanStatement(String to, UserSession session) {
+    public void handleCancelLoanStatement(String to, UserSession session) {
         session.setPendingDocumentType(null);
-        return messageService.sendTextMessage(to, "Loan Statement request cancelled.")
-                .then(screenService.sendMainMenu(to));
+        messageService.sendTextMessage(to, "Loan Statement request cancelled.");
+        screenService.sendMainMenu(to);
     }
 
     // ==================== LOAN CLEARANCE LETTER ====================
-public Mono<Void> handleLoanClearanceMenu(String to, UserSession session) {
+
+    public void handleLoanClearanceMenu(String to, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
 
         if (loanOpt.isEmpty()) {
-            return messageService.sendTextMessage(to, "You have no loan on record for a clearance letter.")
-                    .then(screenService.sendMainMenu(to));
+            messageService.sendTextMessage(to, "You have no loan on record for a clearance letter.");
+            screenService.sendMainMenu(to);
+            return;
         }
         if (!"paid".equals(loanOpt.get().getStatus())) {
-            return messageService.sendTextMessage(to, "You have an outstanding loan balance. Pay Loan to download Loan Clearance Letter.")
-                    .then(screenService.sendMainMenu(to));
+            messageService.sendTextMessage(to, "You have an outstanding loan balance. Pay Loan to download Loan Clearance Letter.");
+            screenService.sendMainMenu(to);
+            return;
         }
 
         session.setPendingDocumentType("loan_clearance");
-        return screenService.sendLoanClearanceConfirm(to, DOCUMENT_COST);
+        screenService.sendLoanClearanceConfirm(to, DOCUMENT_COST);
     }
 
-    public Mono<Void> handleConfirmLoanClearance(String to, UserSession session) {
+    public void handleConfirmLoanClearance(String to, UserSession session) {
         Optional<RegisteredUser> userOpt = userStore.findByPhoneNumber(to);
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
 
         if (userOpt.isEmpty() || loanOpt.isEmpty() || !"paid".equals(loanOpt.get().getStatus())) {
             session.setPendingDocumentType(null);
-            return messageService.sendTextMessage(to, "Something went wrong. Please try again.")
-                    .then(screenService.sendMainMenu(to));
+            messageService.sendTextMessage(to, "Something went wrong. Please try again.");
+            screenService.sendMainMenu(to);
+            return;
         }
         RegisteredUser user = userOpt.get();
         Loan loan = loanOpt.get();
 
-        return sendStkPushPrompt(to, DOCUMENT_COST)
-                .then(Mono.defer(() -> {
-                    log.info("mpesa_stk_push_simulated to={} purpose=loan_clearance", to);
-                    String html = documentHtmlService.generateLoanClearanceHtml(user, loan);
-                    return generateAndSendDocumentLink(to, "loan_clearance", "Loan Clearance Letter", user.getUpn(), html, session);
-                }));
+        sendStkPushPrompt(to, DOCUMENT_COST);
+
+        log.info("mpesa_stk_push_simulated to={} purpose=loan_clearance", to);
+        String html = documentHtmlService.generateLoanClearanceHtml(user, loan);
+        generateAndSendDocumentLink(to, "loan_clearance", "Loan Clearance Letter", user.getUpn(), html, session);
     }
 
-    public Mono<Void> handleCancelLoanClearance(String to, UserSession session) {
+    public void handleCancelLoanClearance(String to, UserSession session) {
         session.setPendingDocumentType(null);
-        return messageService.sendTextMessage(to, "Loan Clearance Letter request cancelled.")
-                .then(screenService.sendMainMenu(to));
+        messageService.sendTextMessage(to, "Loan Clearance Letter request cancelled.");
+        screenService.sendMainMenu(to);
     }
 
     // ==================== SHARED ====================
 
-    private Mono<Void> sendStkPushPrompt(String to, double cost) {
-        return messageService.sendTextMessage(to,
+    private void sendStkPushPrompt(String to, double cost) {
+        messageService.sendTextMessage(to,
                 String.format("You are about to pay KES %.2f to MyMobi account XXXXX. Please enter your Mpesa PIN.", cost));
     }
 
-    private Mono<Void> generateAndSendDocumentLink(String to, String docType, String docTitle, String upn, String html, UserSession session) {
+    private void generateAndSendDocumentLink(String to, String docType, String docTitle, String upn, String html, UserSession session) {
         StoredDocument document = new StoredDocument();
         document.setPhoneNumber(to);
         document.setDocType(docType);
@@ -155,7 +164,7 @@ public Mono<Void> handleLoanClearanceMenu(String to, UserSession session) {
         session.setPendingDocumentType(null);
 
         String link = properties.publicBaseUrl() + "/documents/" + token;
-        return messageService.sendTextMessage(to, "Please click on this link to access your " + docTitle + " " + link)
-                .then(screenService.sendMainMenu(to));
+        messageService.sendTextMessage(to, "Please click on this link to access your " + docTitle + " " + link);
+        screenService.sendMainMenu(to);
     }
 }
