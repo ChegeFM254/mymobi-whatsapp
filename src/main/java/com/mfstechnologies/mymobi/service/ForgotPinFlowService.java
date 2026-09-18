@@ -10,12 +10,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): every method here used to
+ * return Mono<Void>, chaining follow-up screens with .then(). All
+ * converted to plain blocking void methods with sequential statements.
+ * deliverOtpAfterDelay's error handling changed from .doOnError().
+ * subscribe() to a plain try/catch, since sendTextMessage() now throws
+ * directly instead of carrying errors on a reactive error channel.
+ */
 @Service
 public class ForgotPinFlowService {
 
@@ -42,17 +49,19 @@ public class ForgotPinFlowService {
         this.lockoutService = lockoutService;
     }
 
-    public Mono<Void> handleForgotPin(String to, UserSession session) {
+    public void handleForgotPin(String to, UserSession session) {
         long lockoutMinutes = lockoutService.getLockoutMinutesRemaining(to);
         if (lockoutMinutes > 0) {
-            return messageService.sendTextMessage(to,
+            messageService.sendTextMessage(to,
                     "Too many incorrect attempts. Your account is temporarily locked. Please try again in " + lockoutMinutes + " minute(s).");
+            return;
         }
 
         Optional<RegisteredUser> existing = userStore.findByPhoneNumber(to);
         if (existing.isEmpty()) {
-            return messageService.sendTextMessage(to, "No account found for this number. Please register first.")
-                    .then(screenService.sendCivilServantsMenu(to));
+            messageService.sendTextMessage(to, "No account found for this number. Please register first.");
+            screenService.sendCivilServantsMenu(to);
+            return;
         }
 
         String otp = CodeGenerator.generateFiveDigitCode();
@@ -61,16 +70,19 @@ public class ForgotPinFlowService {
         session.setStep("forgot_pin_enter_otp");
 
         deliverOtpAfterDelay(to, otp);
-        return messageService.sendTextMessage(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
+        messageService.sendTextMessage(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
     }
-    public Mono<Void> handleEnterOtp(String to, String text, UserSession session) {
+
+    public void handleEnterOtp(String to, String text, UserSession session) {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
-            return messageService.sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
+            messageService.sendTextMessage(to, "Invalid OTP. Please enter a 5-digit number.");
+            return;
         }
 
         if (text.equals(session.getOtp())) {
             session.setStep("forgot_pin_enter_new_pin");
-            return messageService.sendTextMessage(to, "OTP verified. Please create a new 5-digit PIN:");
+            messageService.sendTextMessage(to, "OTP verified. Please create a new 5-digit PIN:");
+                        return;
         }
 
         session.setOtpAttempts(session.getOtpAttempts() + 1);
@@ -79,38 +91,44 @@ public class ForgotPinFlowService {
             lockoutService.applyLockout(to);
             resetFields(session);
             session.setStep("welcome");
-            return messageService.sendTextMessage(to, "Too many incorrect attempts. Your account has been temporarily locked for 10 minutes.")
-                    .then(screenService.sendWelcome(to));
+            messageService.sendTextMessage(to, "Too many incorrect attempts. Your account has been temporarily locked for 10 minutes.");
+            screenService.sendWelcome(to);
+            return;
         }
 
         int attemptsLeft = MAX_OTP_ATTEMPTS - session.getOtpAttempts();
-        return messageService.sendTextMessage(to, "Incorrect OTP. You have " + attemptsLeft + " attempt(s) remaining.");
+        messageService.sendTextMessage(to, "Incorrect OTP. You have " + attemptsLeft + " attempt(s) remaining.");
     }
 
-    public Mono<Void> handleEnterNewPin(String to, String text, UserSession session) {
+    public void handleEnterNewPin(String to, String text, UserSession session) {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
-            return messageService.sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+            messageService.sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+            return;
         }
         if (text.equals(session.getOtp())) {
-            return messageService.sendTextMessage(to, "Your new PIN cannot be the same as the OTP. Please choose a different 5-digit PIN.");
+            messageService.sendTextMessage(to, "Your new PIN cannot be the same as the OTP. Please choose a different 5-digit PIN.");
+            return;
         }
 
         session.setNewPin(text);
         session.setStep("forgot_pin_confirm_new_pin");
-        return messageService.sendTextMessage(to, "Please re-enter your new 5-digit PIN to confirm.");
+        messageService.sendTextMessage(to, "Please re-enter your new 5-digit PIN to confirm.");
     }
-    public Mono<Void> handleConfirmNewPin(String to, String text, UserSession session) {
+
+    public void handleConfirmNewPin(String to, String text, UserSession session) {
         if (!text.equals(session.getNewPin())) {
             session.setStep("forgot_pin_enter_new_pin");
-            return messageService.sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
+            messageService.sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
+            return;
         }
 
         Optional<RegisteredUser> existing = userStore.findByPhoneNumber(to);
         if (existing.isEmpty()) {
             resetFields(session);
             session.setStep("welcome");
-            return messageService.sendTextMessage(to, "Something went wrong. Please start again.")
-                    .then(screenService.sendWelcome(to));
+            messageService.sendTextMessage(to, "Something went wrong. Please start again.");
+            screenService.sendWelcome(to);
+            return;
         }
 
         RegisteredUser user = existing.get();
@@ -121,11 +139,11 @@ public class ForgotPinFlowService {
         resetFields(session);
         session.setAuthenticated(true);
 
-        return messageService.sendTextMessage(to,
-                        "Your PIN has been reset successfully.\n\n" +
-                        "Do not share this PIN with anyone."
-                )
-                .then(screenService.sendMainMenu(to));
+        messageService.sendTextMessage(to,
+                "Your PIN has been reset successfully.\n\n" +
+                "Do not share this PIN with anyone."
+        );
+        screenService.sendMainMenu(to);
     }
 
     private void resetFields(UserSession session) {
@@ -136,9 +154,13 @@ public class ForgotPinFlowService {
 
     private void deliverOtpAfterDelay(String to, String otp) {
         CompletableFuture.runAsync(
-                () -> messageService.sendTextMessage(to, "OTP " + otp)
-                        .doOnError(err -> log.error("Failed to deliver simulated OTP to {}: {}", to, err.getMessage()))
-                        .subscribe(),
+                () -> {
+                    try {
+                        messageService.sendTextMessage(to, "OTP " + otp);
+                    } catch (Exception err) {
+                        log.error("Failed to deliver simulated OTP to {}: {}", to, err.getMessage());
+                    }
+                },
                 CompletableFuture.delayedExecutor(5, TimeUnit.SECONDS)
         );
     }
