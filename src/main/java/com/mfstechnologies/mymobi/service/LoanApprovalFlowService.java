@@ -10,11 +10,15 @@ import com.mfstechnologies.mymobi.validation.FieldValidators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.Optional;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): every method here used to
+ * return Mono<Void>, chaining follow-up screens with .then(). All
+ * converted to plain blocking void methods with sequential statements.
+ */
 @Service
 public class LoanApprovalFlowService {
 
@@ -40,56 +44,64 @@ public class LoanApprovalFlowService {
 
     // ==================== APPROVE LOAN ====================
 
-    public Mono<Void> handleApproveLoanMenu(String to, UserSession session) {
+    public void handleApproveLoanMenu(String to, UserSession session) {
         Optional<Loan> loan = loanStore.findByPhoneNumber(to);
         if (loan.isEmpty() || !"pending_approval".equals(loan.get().getStatus())) {
-            return screenService.sendMainMenu(to);
+            screenService.sendMainMenu(to);
+            return;
         }
 
-        return screenService.sendApproveLoanDetails(to, loan.get());
+        screenService.sendApproveLoanDetails(to, loan.get());
     }
 
-    public Mono<Void> handleEnterApprovalCodeMenu(String to, UserSession session) {
+    public void handleEnterApprovalCodeMenu(String to, UserSession session) {
         session.setStep("enter_approval_code");
-        return messageService.sendTextMessage(to, "Enter Approval Code:");
+        messageService.sendTextMessage(to, "Enter Approval Code:");
     }
 
-    public Mono<Void> handleEnterApprovalCode(String to, String text, UserSession session) {
+    public void handleEnterApprovalCode(String to, String text, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"pending_approval".equals(loanOpt.get().getStatus())) {
             session.setStep("welcome");
-            return screenService.sendHomeScreen(to, session);
+            screenService.sendHomeScreen(to, session);
+            return;
         }
         Loan loan = loanOpt.get();
 
         if (text == null || !text.matches("^\\d{6}$")) {
-            return messageService.sendTextMessage(to, "Invalid code. Please enter the 6-character Approval Code exactly as sent.");
+            messageService.sendTextMessage(to, "Invalid code. Please enter the 6-character Approval Code exactly as sent.");
+            return;
         }
 
         if (!text.equals(loan.getApprovalCode())) {
-            return recordFailedApprovalAttempt(to, session, loan, true);
+            recordFailedApprovalAttempt(to, session, loan, true);
+            return;
         }
 
         session.setStep("approval_payroll_number");
-        return messageService.sendTextMessage(to, "Enter Payroll Number to confirm approval:");
+        messageService.sendTextMessage(to, "Enter Payroll Number to confirm approval:");
     }
-    public Mono<Void> handleApprovalPayrollNumber(String to, String text, UserSession session) {
+
+    public void handleApprovalPayrollNumber(String to, String text, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"pending_approval".equals(loanOpt.get().getStatus())) {
             session.setStep("welcome");
-            return screenService.sendHomeScreen(to, session);
+            screenService.sendHomeScreen(to, session);
+            return;
         }
         Loan loan = loanOpt.get();
 
         if (!FieldValidators.isValidUpn(text)) {
-            return messageService.sendTextMessage(to, "UPN should be up to 11 digits and start with 1 or 2. Please try again.");
+            messageService.sendTextMessage(to, "UPN should be up to 11 digits and start with 1 or 2. Please try again.");
+            return;
         }
 
         Optional<RegisteredUser> registeredUser = userStore.findByPhoneNumber(to);
         boolean matches = registeredUser.isPresent() && text.equals(registeredUser.get().getUpn());
 
         if (!matches) {
-            return recordFailedApprovalAttempt(to, session, loan, false);
+            recordFailedApprovalAttempt(to, session, loan, false);
+            return;
         }
 
         loan.setStatus("approved");
@@ -102,11 +114,11 @@ public class LoanApprovalFlowService {
                 "Your loan approval has been submitted. KES %,d will be sent to your M-Pesa account. Thank you for using MyMobi.",
                 loan.getBreakdown().disbursement()
         );
-        return messageService.sendTextMessage(to, message)
-                .then(screenService.sendHomeScreen(to, session));
+        messageService.sendTextMessage(to, message);
+        screenService.sendHomeScreen(to, session);
     }
 
-    private Mono<Void> recordFailedApprovalAttempt(String to, UserSession session, Loan loan, boolean isCodeAttempt) {
+    private void recordFailedApprovalAttempt(String to, UserSession session, Loan loan, boolean isCodeAttempt) {
         int attempts;
         if (isCodeAttempt) {
             loan.setApprovalCodeAttempts(loan.getApprovalCodeAttempts() + 1);
@@ -119,29 +131,30 @@ public class LoanApprovalFlowService {
         if (attempts >= MAX_APPROVAL_ATTEMPTS) {
             loanStore.delete(to);
             session.setStep("welcome");
-            return messageService.sendTextMessage(to, "Too many incorrect attempts. Your loan application has been cancelled for your security.")
-                    .then(screenService.sendHomeScreen(to, session));
+            messageService.sendTextMessage(to, "Too many incorrect attempts. Your loan application has been cancelled for your security.");
+            screenService.sendHomeScreen(to, session);
+            return;
         }
 
         int attemptsLeft = MAX_APPROVAL_ATTEMPTS - attempts;
         String what = isCodeAttempt ? "Approval Code" : "Payroll Number";
-        return messageService.sendTextMessage(to, "Incorrect " + what + ". You have " + attemptsLeft + " attempt(s) remaining.");
+        messageService.sendTextMessage(to, "Incorrect " + what + ". You have " + attemptsLeft + " attempt(s) remaining.");
     }
 
     // ==================== CANCEL LOAN ====================
 
-    public Mono<Void> handleCancelLoan(String to, UserSession session) {
-        return screenService.sendCancelLoanConfirm(to);
+    public void handleCancelLoan(String to, UserSession session) {
+        screenService.sendCancelLoanConfirm(to);
     }
 
-    public Mono<Void> handleCancelLoanYes(String to, UserSession session) {
+    public void handleCancelLoanYes(String to, UserSession session) {
         loanStore.delete(to);
         log.info("loan_cancelled to={}", to);
-        return messageService.sendTextMessage(to, "Your loan application has been cancelled.")
-                .then(screenService.sendMainMenu(to));
+        messageService.sendTextMessage(to, "Your loan application has been cancelled.");
+        screenService.sendMainMenu(to);
     }
 
-    public Mono<Void> handleCancelLoanNo(String to, UserSession session) {
-        return screenService.sendMainMenu(to);
+    public void handleCancelLoanNo(String to, UserSession session) {
+        screenService.sendMainMenu(to);
     }
 }
