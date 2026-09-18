@@ -10,12 +10,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import reactor.core.publisher.Mono;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+/**
+ * WORKSTREAM B (reactive -> synchronous): rewritten for the now-void
+ * LoanPaymentFlowService methods. No more .block() calls or Mono.empty()
+ * stubs anywhere.
+ */
 @ExtendWith(MockitoExtension.class)
 class LoanPaymentFlowServiceTest {
 
@@ -51,9 +55,8 @@ class LoanPaymentFlowServiceTest {
     void payLoanMenuShowsOptionsForAnApprovedLoan() {
         loanStore.save(FROM, approvedLoan(3, 0));
         UserSession session = new UserSession();
-        when(screenService.sendPayLoanOptions(FROM, 3, 14442)).thenReturn(Mono.empty());
 
-        paymentFlow.handlePayLoanMenu(FROM, session).block();
+        paymentFlow.handlePayLoanMenu(FROM, session);
 
         verify(screenService).sendPayLoanOptions(FROM, 3, 14442);
     }
@@ -65,9 +68,8 @@ class LoanPaymentFlowServiceTest {
         loanStore.save(FROM, pending);
 
         UserSession session = new UserSession();
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        paymentFlow.handlePayLoanMenu(FROM, session).block();
+        paymentFlow.handlePayLoanMenu(FROM, session);
 
         verify(screenService, never()).sendPayLoanOptions(anyString(), anyInt(), anyInt());
     }
@@ -78,9 +80,8 @@ class LoanPaymentFlowServiceTest {
     void selectingAValidInstallmentCountShowsConfirmation() {
         loanStore.save(FROM, approvedLoan(3, 0));
         UserSession session = new UserSession();
-        when(screenService.sendPayLoanConfirm(FROM, 2, 28884, 14442, 1)).thenReturn(Mono.empty());
 
-        paymentFlow.handlePayInstallmentsSelect(FROM, "pay_installments_2", session).block();
+        paymentFlow.handlePayInstallmentsSelect(FROM, "pay_installments_2", session);
 
         assertThat(session.getPendingPaymentInstallments()).isEqualTo(2);
         verify(screenService).sendPayLoanConfirm(FROM, 2, 28884, 14442, 1);
@@ -90,24 +91,22 @@ class LoanPaymentFlowServiceTest {
     void selectingMoreInstallmentsThanRemainingIsRejected() {
         loanStore.save(FROM, approvedLoan(3, 2)); // only 1 remaining
         UserSession session = new UserSession();
-        when(screenService.sendPayLoanOptions(FROM, 1, 14442)).thenReturn(Mono.empty());
 
-        paymentFlow.handlePayInstallmentsSelect(FROM, "pay_installments_2", session).block();
+        paymentFlow.handlePayInstallmentsSelect(FROM, "pay_installments_2", session);
 
         assertThat(session.getPendingPaymentInstallments()).isNull();
     }
 
     // ==================== CONFIRM PAYMENT ====================
-@Test
+
+    @Test
     void confirmingAPartialPaymentUpdatesInstallmentsAndStaysApproved() {
         Loan loan = approvedLoan(3, 0);
         loanStore.save(FROM, loan);
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(1);
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        paymentFlow.handleConfirmPayLoan(FROM, session).block();
+        paymentFlow.handleConfirmPayLoan(FROM, session);
 
         assertThat(loan.getInstallmentsPaid()).isEqualTo(1);
         assertThat(loan.getStatus()).isEqualTo("approved");
@@ -122,10 +121,8 @@ class LoanPaymentFlowServiceTest {
         loanStore.save(FROM, loan);
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(1);
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendHomeScreen(FROM, session)).thenReturn(Mono.empty());
 
-        paymentFlow.handleConfirmPayLoan(FROM, session).block();
+        paymentFlow.handleConfirmPayLoan(FROM, session);
 
         assertThat(loan.getInstallmentsPaid()).isEqualTo(3);
         assertThat(loan.getStatus()).isEqualTo("paid");
@@ -141,15 +138,14 @@ class LoanPaymentFlowServiceTest {
         loanStore.save(FROM, loan);
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(2); // paying 2 of 3 in one go
-        when(messageService.sendTextMessage(eq(FROM), anyString())).thenReturn(Mono.empty());
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        paymentFlow.handleConfirmPayLoan(FROM, session).block();
+        paymentFlow.handleConfirmPayLoan(FROM, session);
 
         assertThat(loan.getInstallmentsPaid()).isEqualTo(2);
         verify(messageService).sendTextMessage(eq(FROM),
                 eq("Your installment of KES 28,884 Ref: MVCAGHD1 has been paid. You have a loan balance of KES 14,442. Thank you for using MyMobi services."));
     }
+
     @Test
     void paymentInProgressGuardPreventsADoubleTapFromPayingTwice() {
         Loan loan = approvedLoan(3, 0);
@@ -158,7 +154,7 @@ class LoanPaymentFlowServiceTest {
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(1);
 
-        paymentFlow.handleConfirmPayLoan(FROM, session).block();
+        paymentFlow.handleConfirmPayLoan(FROM, session);
 
         assertThat(loan.getInstallmentsPaid()).isZero(); // unaffected by the second tap
         verifyNoInteractions(messageService);
@@ -170,9 +166,8 @@ class LoanPaymentFlowServiceTest {
     void cancelingPaymentClearsSelectionAndReturnsToMainMenu() {
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(2);
-        when(screenService.sendMainMenu(FROM)).thenReturn(Mono.empty());
 
-        paymentFlow.handleCancelPayLoan(FROM, session).block();
+        paymentFlow.handleCancelPayLoan(FROM, session);
 
         assertThat(session.getPendingPaymentInstallments()).isNull();
     }
