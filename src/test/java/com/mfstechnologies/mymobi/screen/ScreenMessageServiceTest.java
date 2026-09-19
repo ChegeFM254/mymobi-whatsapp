@@ -1,8 +1,11 @@
 package com.mfstechnologies.mymobi.screen;
 
 import com.mfstechnologies.mymobi.model.Loan;
+import com.mfstechnologies.mymobi.model.RegisteredUser;
 import com.mfstechnologies.mymobi.service.WhatsAppMessageService;
 import com.mfstechnologies.mymobi.session.LoanStore;
+import com.mfstechnologies.mymobi.session.RegisteredUserRepository;
+import com.mfstechnologies.mymobi.testsupport.FakeRepositories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,6 +35,11 @@ import static org.mockito.Mockito.verify;
  * stub also changed: sendMessage() is now void, so it's stubbed with
  * doNothing().when(...) rather than when(...).thenReturn(...), which
  * only works for non-void methods.
+ *
+ * WORKSTREAM C (persistence): RegisteredUserStore is now Postgres-backed
+ * - userStore here is wired to a fake, in-memory-backed repository (see
+ * FakeRepositories) so it keeps behaving like a real, working
+ * collaborator, exactly as it did with the old ConcurrentHashMap.
  */
 @ExtendWith(MockitoExtension.class)
 class ScreenMessageServiceTest {
@@ -40,6 +48,8 @@ class ScreenMessageServiceTest {
 
     @Mock
     private WhatsAppMessageService messageService;
+    @Mock
+    private RegisteredUserRepository registeredUserRepository;
 
     @Captor
     private ArgumentCaptor<Map<String, Object>> payloadCaptor;
@@ -51,7 +61,8 @@ class ScreenMessageServiceTest {
     @BeforeEach
     void setUp() {
         loanStore = new LoanStore();
-        userStore = new com.mfstechnologies.mymobi.session.RegisteredUserStore();
+        FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
+        userStore = new com.mfstechnologies.mymobi.session.RegisteredUserStore(registeredUserRepository);
         screenService = new ScreenMessageService(messageService, loanStore, userStore);
         doNothing().when(messageService).sendMessage(eq(FROM), payloadCaptor.capture());
     }
