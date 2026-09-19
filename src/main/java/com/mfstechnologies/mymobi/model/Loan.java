@@ -1,5 +1,7 @@
 package com.mfstechnologies.mymobi.model;
 
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
@@ -19,10 +21,22 @@ import java.time.Instant;
  *
  * breakdown is @Embedded - LoanBreakdown is marked @Embeddable and
  * stores its 5 fields directly as columns on this same loans table,
- * rather than needing its own separate table.
+ * rather than needing its own separate table. @AttributeOverrides
+ * renames every one of those 5 columns with a breakdown_ prefix -
+ * without this, LoanBreakdown.loanAmount would map to the exact same
+ * physical column name (loan_amount) that Loan's own top-level
+ * loanAmount field already uses, which Hibernate correctly rejects as a
+ * DuplicateMappingException rather than silently colliding the two.
  */
 @Entity
 @Table(name = "loans")
+@AttributeOverrides({
+        @AttributeOverride(name = "loanAmount", column = @Column(name = "breakdown_loan_amount")),
+        @AttributeOverride(name = "upfrontFee", column = @Column(name = "breakdown_upfront_fee")),
+        @AttributeOverride(name = "disbursement", column = @Column(name = "breakdown_disbursement")),
+        @AttributeOverride(name = "monthlyInstallment", column = @Column(name = "breakdown_monthly_installment")),
+        @AttributeOverride(name = "platformFee", column = @Column(name = "breakdown_platform_fee"))
+})
 public class Loan {
 
     @Id
