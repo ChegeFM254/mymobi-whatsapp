@@ -4,7 +4,9 @@ import com.mfstechnologies.mymobi.model.Loan;
 import com.mfstechnologies.mymobi.model.LoanBreakdown;
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
+import com.mfstechnologies.mymobi.session.LoanRepository;
 import com.mfstechnologies.mymobi.session.LoanStore;
+import com.mfstechnologies.mymobi.testsupport.FakeRepositories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +21,11 @@ import static org.mockito.Mockito.*;
  * WORKSTREAM B (reactive -> synchronous): rewritten for the now-void
  * LoanPaymentFlowService methods. No more .block() calls or Mono.empty()
  * stubs anywhere.
+ *
+ * WORKSTREAM C (persistence): LoanStore is now Postgres-backed -
+ * loanStore here is wired to a fake, in-memory-backed repository (see
+ * FakeRepositories) so it keeps behaving like a real, working
+ * collaborator, exactly as it did with the old ConcurrentHashMap.
  */
 @ExtendWith(MockitoExtension.class)
 class LoanPaymentFlowServiceTest {
@@ -29,13 +36,16 @@ class LoanPaymentFlowServiceTest {
     private ScreenMessageService screenService;
     @Mock
     private WhatsAppMessageService messageService;
+    @Mock
+    private LoanRepository loanRepository;
 
     private LoanStore loanStore;
     private LoanPaymentFlowService paymentFlow;
 
     @BeforeEach
     void setUp() {
-        loanStore = new LoanStore();
+        FakeRepositories.wireAsInMemoryStore(loanRepository, Loan::getPhoneNumber);
+        loanStore = new LoanStore(loanRepository);
         paymentFlow = new LoanPaymentFlowService(screenService, messageService, loanStore);
     }
 
