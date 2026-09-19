@@ -5,48 +5,73 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Generated-document storage (payslips, loan statements, loan clearance
+ * letters), keyed by a one-time access token rather than phone number.
+ *
+ * WORKSTREAM C (persistence): now backed by Postgres via
+ * DocumentRepository, rather than an in-memory ConcurrentHashMap. The
+ * public method signatures are UNCHANGED from the in-memory version on
+ * purpose: nothing calling this class needs to change.
+ *
+ * recordFailedAttempt() reads, mutates, then explicitly calls
+ * repository.save(doc) again to persist the change - findById() returns
+ * a detached entity outside any transaction boundary here, so mutating
+ * the returned object alone would NOT be written back without this
+ * explicit save call.
+ *
+ * save(token, document) sets token onto the entity itself before
+ * persisting, since the in-memory version's callers never needed to set
+ * that field themselves (it was only ever the external Map key before).
+ */
 @Service
 public class DocumentStore {
 
     private static final Duration TTL = Duration.ofHours(24);
     private static final int MAX_FAILED_ATTEMPTS = 5;
 
-    private final Map<String, StoredDocument> documents = new ConcurrentHashMap<>();
+    private final DocumentRepository repository;
+
+    public DocumentStore(DocumentRepository repository) {
+        this.repository = repository;
+    }
 
     public void save(String token, StoredDocument document) {
-        documents.put(token, document);
+        document.setToken(token);
+        repository.save(document);
     }
 
     public Optional<StoredDocument> findValid(String token) {
-        StoredDocument doc = documents.get(token);
-        if (doc == null) {
+        Optional<StoredDocument> docOpt = repository.findById(token);
+        if (docOpt.isEmpty()) {
             return Optional.empty();
         }
+        StoredDocument doc = docOpt.get();
         if (doc.isInvalidated()) {
             return Optional.empty();
         }
         if (Duration.between(doc.getCreatedAt(), Instant.now()).compareTo(TTL) > 0) {
-            documents.remove(token);
+            repository.deleteById(token);
             return Optional.empty();
         }
         return Optional.of(doc);
     }
 
     public boolean recordFailedAttempt(String token) {
-        StoredDocument doc = documents.get(token);
-        if (doc == null) {
+        Optional<StoredDocument> docOpt = repository.findById(token);
+        if (docOpt.isEmpty()) {
             return false;
         }
+        StoredDocument doc = docOpt.get();
         doc.setFailedAttempts(doc.getFailedAttempts() + 1);
-        if (doc.getFailedAttempts() >= MAX_FAILED_ATTEMPTS) {
+        boolean nowInvalidated = doc.getFailedAttempts() >= MAX_FAILED_ATTEMPTS;
+        if (nowInvalidated) {
             doc.setInvalidated(true);
-            return true;
         }
-        return false;
+        repository.save(doc);
+        return nowInvalidated;
     }
 
     public int getMaxFailedAttempts() {
