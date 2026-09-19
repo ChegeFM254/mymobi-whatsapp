@@ -3,6 +3,7 @@ package com.mfstechnologies.mymobi.screen;
 import com.mfstechnologies.mymobi.model.Loan;
 import com.mfstechnologies.mymobi.model.RegisteredUser;
 import com.mfstechnologies.mymobi.service.WhatsAppMessageService;
+import com.mfstechnologies.mymobi.session.LoanRepository;
 import com.mfstechnologies.mymobi.session.LoanStore;
 import com.mfstechnologies.mymobi.session.RegisteredUserRepository;
 import com.mfstechnologies.mymobi.testsupport.FakeRepositories;
@@ -36,10 +37,11 @@ import static org.mockito.Mockito.verify;
  * doNothing().when(...) rather than when(...).thenReturn(...), which
  * only works for non-void methods.
  *
- * WORKSTREAM C (persistence): RegisteredUserStore is now Postgres-backed
- * - userStore here is wired to a fake, in-memory-backed repository (see
- * FakeRepositories) so it keeps behaving like a real, working
- * collaborator, exactly as it did with the old ConcurrentHashMap.
+ * WORKSTREAM C (persistence): RegisteredUserStore and LoanStore are now
+ * Postgres-backed - both are wired to fake, in-memory-backed
+ * repositories (see FakeRepositories) so they keep behaving like real,
+ * working collaborators, exactly as they did with the old
+ * ConcurrentHashMap.
  */
 @ExtendWith(MockitoExtension.class)
 class ScreenMessageServiceTest {
@@ -50,6 +52,8 @@ class ScreenMessageServiceTest {
     private WhatsAppMessageService messageService;
     @Mock
     private RegisteredUserRepository registeredUserRepository;
+    @Mock
+    private LoanRepository loanRepository;
 
     @Captor
     private ArgumentCaptor<Map<String, Object>> payloadCaptor;
@@ -60,7 +64,8 @@ class ScreenMessageServiceTest {
 
     @BeforeEach
     void setUp() {
-        loanStore = new LoanStore();
+        FakeRepositories.wireAsInMemoryStore(loanRepository, Loan::getPhoneNumber);
+        loanStore = new LoanStore(loanRepository);
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
         userStore = new com.mfstechnologies.mymobi.session.RegisteredUserStore(registeredUserRepository);
         screenService = new ScreenMessageService(messageService, loanStore, userStore);
