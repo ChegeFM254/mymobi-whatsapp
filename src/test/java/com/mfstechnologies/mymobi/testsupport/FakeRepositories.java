@@ -1,89 +1,71 @@
-package com.mfstechnologies.mymobi.session;
+package com.mfstechnologies.mymobi.testsupport;
 
-import com.mfstechnologies.mymobi.model.RegisteredUser;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.when;
 
 /**
- * WORKSTREAM C (persistence): rewritten for the now Postgres-backed
- * RegisteredUserStore. Rather than exercising a real ConcurrentHashMap,
- * this mocks RegisteredUserRepository and verifies the store correctly
- * delegates to it - the same pattern used throughout this codebase for
- * every other service's dependencies. Also covers a genuinely new piece
- * of behavior: save() must set phoneNumber onto the entity itself before
- * persisting, since callers never had to do that with the old in-memory
- * version (phoneNumber was only ever the external Map key before).
+ * WORKSTREAM C (persistence): a small, reusable helper for tests that
+ * need one of the Postgres-backed stores (RegisteredUserStore,
+ * LoanStore, DocumentStore, ...) to behave like a real, working
+ * in-memory collaborator - the same way the old ConcurrentHashMap-backed
+ * versions did - rather than a Mockito mock that returns null/no-ops for
+ * everything.
+ *
+ * Wires just the 4 JpaRepository methods each store's internals actually
+ * call (findById, save, existsById, deleteById) to a real backing
+ * HashMap. Every other method on JpaRepository (there are dozens -
+ * findAll, saveAll, count, paging/sorting variants, etc.) is left
+ * unstubbed entirely: Mockito's default null/no-op behavior for
+ * unstubbed mock methods is exactly correct here, since nothing in this
+ * codebase calls them - there's no need to implement the rest of the
+ * interface just to satisfy it.
+ *
+ * Usage in a test:
+ *   @Mock
+ *   private RegisteredUserRepository repository;
+ *
+ *   @BeforeEach
+ *   void setUp() {
+ *       FakeRepositories.wireAsInMemoryStore(repository, RegisteredUser::getPhoneNumber);
+ *       userStore = new RegisteredUserStore(repository);
+ *   }
  */
-@ExtendWith(MockitoExtension.class)
-class RegisteredUserStoreTest {
+public final class FakeRepositories {
 
-    private static final String FROM = "254700000001";
-
-    @Mock
-    private RegisteredUserRepository repository;
-
-    private RegisteredUserStore store;
-
-    @BeforeEach
-    void setUp() {
-        store = new RegisteredUserStore(repository);
+    private FakeRepositories() {
     }
 
-    private RegisteredUser sampleUser() {
-        RegisteredUser user = new RegisteredUser();
-        user.setFirstName("Jane");
-        user.setLastName("Doe");
-        user.setUpn("12345");
-        return user;
-    }
+    public static <T, ID> void wireAsInMemoryStore(JpaRepository<T, ID> mockRepository, Function<T, ID> idExtractor) {
+        Map<ID, T> backing = new HashMap<>();
 
-    @Test
-    void findByPhoneNumberDelegatesToFindById() {
-        RegisteredUser user = sampleUser();
-        when(repository.findById(FROM)).thenReturn(Optional.of(user));
+        when(mockRepository.findById(any())).thenAnswer(invocation -> {
+            ID id = invocation.getArgument(0);
+            return Optional.ofNullable(backing.get(id));
+        });
 
-        assertThat(store.findByPhoneNumber(FROM)).contains(user);
-    }
+        when(mockRepository.save(any())).thenAnswer(invocation -> {
+            T entity = invocation.getArgument(0);
+            backing.put(idExtractor.apply(entity), entity);
+            return entity;
+        });
 
-    @Test
-    void findByPhoneNumberReturnsEmptyWhenRepositoryHasNothing() {
-        when(repository.findById(FROM)).thenReturn(Optional.empty());
+        when(mockRepository.existsById(any())).thenAnswer(invocation -> {
+            ID id = invocation.getArgument(0);
+            return backing.containsKey(id);
+        });
 
-        assertThat(store.findByPhoneNumber(FROM)).isEmpty();
-    }
-
-    @Test
-    void saveSetsThePhoneNumberOntoTheEntityBeforePersisting() {
-        RegisteredUser user = sampleUser();
-        assertThat(user.getPhoneNumber()).isNull(); // not set yet
-
-        store.save(FROM, user);
-
-        assertThat(user.getPhoneNumber()).isEqualTo(FROM); // now set, by the store itself
-        verify(repository).save(user);
-    }
-
-    @Test
-    void existsDelegatesToExistsById() {
-        when(repository.existsById(FROM)).thenReturn(true);
-
-        assertThat(store.exists(FROM)).isTrue();
-        verify(repository).existsById(FROM);
-    }
-
-    @Test
-    void deleteDelegatesToDeleteById() {
-        store.delete(FROM);
-
-        verify(repository).deleteById(FROM);
+        doAnswer(invocation -> {
+            ID id = invocation.getArgument(0);
+            backing.remove(id);
+            return null;
+        }).when(mockRepository).deleteById(any());
     }
 }
