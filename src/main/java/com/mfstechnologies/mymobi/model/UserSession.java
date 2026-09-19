@@ -50,6 +50,47 @@ public class UserSession {
     public UserSession() {
     }
 
+    /**
+     * WORKSTREAM C (persistence): resets every field back to a fresh
+     * UserSession's defaults, in place on this same object. Needed once
+     * SessionStore moved to Redis - the old in-memory version could
+     * achieve "make this look like a brand new session" simply by
+     * removing the Map entry (sessionStore.delete(...)), since any FUTURE
+     * getOrCreate() call would then legitimately construct a fresh
+     * object. With Redis, ConversationService saves back whatever state
+     * THIS SAME in-flight object ends up in, in its own finally block,
+     * so achieving "look brand new" requires actually resetting this
+     * object's fields, not just removing a soon-to-be-overwritten Redis
+     * entry.
+     */
+    public void reset() {
+        this.step = "welcome";
+        this.newSession = true;
+        this.lastProcessedAt = null;
+        this.authenticated = false;
+        this.loginAttempts = 0;
+        this.loginUpn = null;
+        this.verificationCode = null;
+        this.firstName = null;
+        this.middleName = null;
+        this.lastName = null;
+        this.emailAddress = null;
+        this.upn = null;
+        this.nationalId = null;
+        this.mobileNumber = null;
+        this.otp = null;
+        this.otpAttempts = 0;
+        this.newPin = null;
+        this.loanTenureMonths = null;
+                this.loanLimit = null;
+        this.loanAmount = null;
+        this.payrollNumberAttempts = 0;
+        this.currentMenu = null;
+        this.pendingPaymentInstallments = null;
+        this.pendingDocumentType = null;
+        this.pendingDocumentMonths = null;
+    }
+
     public String getStep() { return step; }
     public void setStep(String step) { this.step = step; }
 
