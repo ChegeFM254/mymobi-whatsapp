@@ -2,6 +2,9 @@ package com.mfstechnologies.mymobi.service;
 
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
+import com.mfstechnologies.mymobi.session.RegisteredUserRepository;
+import com.mfstechnologies.mymobi.session.RegisteredUserStore;
+import com.mfstechnologies.mymobi.testsupport.FakeRepositories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,6 +27,13 @@ import static org.mockito.Mockito.*;
  * itself already void, Mockito's default no-op behavior for void
  * methods means no stubbing is needed at all; verify(...) still checks
  * the calls happened exactly as before.
+ *
+ * WORKSTREAM C (persistence): RegisteredUserStore is now Postgres-backed
+ * - freshUserStore() below creates a fresh mock repository per call,
+ * wired to a fake, in-memory-backed implementation (see
+ * FakeRepositories), so every place that used to construct a plain
+ * `new RegisteredUserStore()` still gets its own working, independent
+ * collaborator.
  */
 @ExtendWith(MockitoExtension.class)
 class AuthenticationFlowServiceTest {
@@ -41,12 +51,18 @@ class AuthenticationFlowServiceTest {
     private LoginVerificationService loginVerificationService;
     private AuthenticationFlowService authFlowService;
 
+    private RegisteredUserStore freshUserStore() {
+        RegisteredUserRepository repository = mock(RegisteredUserRepository.class);
+        FakeRepositories.wireAsInMemoryStore(repository, com.mfstechnologies.mymobi.model.RegisteredUser::getPhoneNumber);
+        return new RegisteredUserStore(repository);
+    }
+
     @BeforeEach
-    void setUp() {
+        void setUp() {
         lockoutService = new LoginLockoutService(600);
         PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
         loginVerificationService = new LoginVerificationService(
-                new com.mfstechnologies.mymobi.session.RegisteredUserStore(),
+                freshUserStore(),
                 passwordEncoder,
                 true
         );
@@ -67,7 +83,8 @@ class AuthenticationFlowServiceTest {
     @Test
     void unauthenticatedSessionSeesTheCivilServantsMenu() {
         UserSession session = new UserSession();
-                authFlowService.handleCivilServants(FROM, session);
+
+        authFlowService.handleCivilServants(FROM, session);
 
         verify(screenService).sendCivilServantsMenu(FROM);
         verify(screenService, never()).sendMainMenu(anyString());
@@ -100,8 +117,7 @@ class AuthenticationFlowServiceTest {
         session.setStep("login_enter_upn");
 
         authFlowService.handleLoginEnterUpn(FROM, "notanumber", session);
-
-        assertThat(session.getStep()).isEqualTo("login_enter_upn");
+                assertThat(session.getStep()).isEqualTo("login_enter_upn");
         verify(messageService).sendTextMessage(eq(FROM), contains("UPN"));
     }
 
@@ -135,9 +151,9 @@ class AuthenticationFlowServiceTest {
         var realUser = new com.mfstechnologies.mymobi.model.RegisteredUser();
         realUser.setUpn("19999999");
         realUser.setHashedPin(new BCryptPasswordEncoder().encode("11111"));
-        var userStore = new com.mfstechnologies.mymobi.session.RegisteredUserStore();
+        var userStore = freshUserStore();
         userStore.save(FROM, realUser);
-                var realLoginService = new LoginVerificationService(userStore, new BCryptPasswordEncoder(), true);
+        var realLoginService = new LoginVerificationService(userStore, new BCryptPasswordEncoder(), true);
         var flowWithRealUser = new AuthenticationFlowService(screenService, messageService, lockoutService, realLoginService, inactivityTimeoutService);
 
         UserSession session = new UserSession();
@@ -156,7 +172,7 @@ class AuthenticationFlowServiceTest {
         var realUser = new com.mfstechnologies.mymobi.model.RegisteredUser();
         realUser.setUpn("19999999");
         realUser.setHashedPin(new BCryptPasswordEncoder().encode("11111"));
-        var userStore = new com.mfstechnologies.mymobi.session.RegisteredUserStore();
+                var userStore = freshUserStore();
         userStore.save(FROM, realUser);
         var realLoginService = new LoginVerificationService(userStore, new BCryptPasswordEncoder(), true);
         var flowWithRealUser = new AuthenticationFlowService(screenService, messageService, lockoutService, realLoginService, inactivityTimeoutService);
