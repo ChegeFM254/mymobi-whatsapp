@@ -68,12 +68,12 @@ public class ConversationService {
             PayslipFlowService payslipFlowService,
             LoanDocumentFlowService loanDocumentFlowService,
             InactivityTimeoutService inactivityTimeoutService
-            ) {
+    ) {
         this.sessionStore = sessionStore;
         this.screenService = screenService;
         this.messageService = messageService;
         this.authFlowService = authFlowService;
-        this.registrationFlowService = registrationFlowService;
+                this.registrationFlowService = registrationFlowService;
         this.forgotPinFlowService = forgotPinFlowService;
         this.optOutFlowService = optOutFlowService;
         this.loanApplicationFlowService = loanApplicationFlowService;
@@ -95,32 +95,45 @@ public class ConversationService {
 
         UserSession session = sessionStore.getOrCreate(from);
 
-        inactivityTimeoutService.resetTimeout(from);
+        // WORKSTREAM C (persistence): SessionStore is Redis-backed now,
+        // so getOrCreate() returns a freshly-deserialized (or brand new)
+        // object each call - unlike the old in-memory version, nothing
+        // else automatically persists whatever this method (or anything
+        // it calls) mutates on it. This try/finally guarantees save()
+        // runs on every exit path - every early return below, the
+        // handleButton/handleText branches, and even if something throws
+        // partway through - so no mutation made anywhere during this
+        // message's processing is ever silently lost.
+        try {
+            inactivityTimeoutService.resetTimeout(from);
 
-        if (isDebounced(session)) {
-            log.info("debounced_duplicate_input from={}", from);
-            return;
-        }
-        session.setLastProcessedAt(Instant.now());
+            if (isDebounced(session)) {
+                log.info("debounced_duplicate_input from={}", from);
+                return;
+            }
+            session.setLastProcessedAt(Instant.now());
 
-        boolean isFreshWelcomeTrigger = message.hasText()
-                && isTriggerWord(message.text())
-                && "welcome".equals(session.getStep())
-                && session.isNewSession();
+            boolean isFreshWelcomeTrigger = message.hasText()
+                    && isTriggerWord(message.text())
+                    && "welcome".equals(session.getStep())
+                    && session.isNewSession();
 
-        if (isFreshWelcomeTrigger) {
-            session.setNewSession(false);
-            screenService.sendWelcome(from);
-            return;
-        }
+            if (isFreshWelcomeTrigger) {
+                session.setNewSession(false);
+                screenService.sendWelcome(from);
+                return;
+            }
 
-        if (message.hasButton()) {
-            handleButton(from, message.buttonId(), session);
-            return;
-        }
+            if (message.hasButton()) {
+                handleButton(from, message.buttonId(), session);
+                return;
+            }
 
-        if (message.hasText()) {
-            handleText(from, message.text(), session);
+            if (message.hasText()) {
+                handleText(from, message.text(), session);
+            }
+        } finally {
+            sessionStore.save(from, session);
         }
     }
 
@@ -135,10 +148,10 @@ public class ConversationService {
     private boolean isTriggerWord(String text) {
         String normalized = text.trim().toLowerCase();
         return TRIGGER_WORDS.contains(normalized) || normalized.contains(TRIGGER_SUBSTRING);
-    }
+            }
 
     private void handleButton(String to, String buttonId, UserSession session) {
-                log.info("button_tapped to={} buttonId={}", to, buttonId);
+        log.info("button_tapped to={} buttonId={}", to, buttonId);
 
         if (EDIT_FIELD_IDS.contains(buttonId)) {
             registrationFlowService.handleEditFieldSelect(to, buttonId, session);
@@ -207,9 +220,10 @@ public class ConversationService {
             }
         }
     }
-        private void handleText(String to, String text, UserSession session) {
-        log.info("text_received to={} step={}", to, session.getStep());
 
+    private void handleText(String to, String text, UserSession session) {
+        log.info("text_received to={} step={}", to, session.getStep());
+        
         String step = session.getStep();
 
         if (EDIT_FIELD_IDS.contains(step)) {
@@ -261,7 +275,16 @@ public class ConversationService {
             return;
         }
 
-        sessionStore.delete(to);
+        // WORKSTREAM C (persistence): used to call sessionStore.delete(to)
+        // here - correct for the old in-memory store (removing the Map
+        // entry meant any future getOrCreate() would legitimately start
+        // fresh), but with Redis, handleIncomingMessage()'s finally block
+        // will save THIS SAME object back regardless, which would
+        // silently undo a delete(). session.reset() achieves the
+        // identical end result (a fresh-looking session) by resetting
+        // this object's own fields, so whatever gets saved back already
+        // reflects a brand new session's defaults.
+        session.reset();
         messageService.sendTextMessage(to, "Sorry, something went wrong. Let's start over.");
         screenService.sendWelcome(to);
     }
