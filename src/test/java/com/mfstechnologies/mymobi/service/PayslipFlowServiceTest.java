@@ -3,8 +3,10 @@ package com.mfstechnologies.mymobi.service;
 import com.mfstechnologies.mymobi.config.WhatsAppProperties;
 import com.mfstechnologies.mymobi.document.DocumentHtmlService;
 import com.mfstechnologies.mymobi.model.RegisteredUser;
+import com.mfstechnologies.mymobi.model.StoredDocument;
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
+import com.mfstechnologies.mymobi.session.DocumentRepository;
 import com.mfstechnologies.mymobi.session.DocumentStore;
 import com.mfstechnologies.mymobi.session.RegisteredUserRepository;
 import com.mfstechnologies.mymobi.session.RegisteredUserStore;
@@ -24,10 +26,11 @@ import static org.mockito.Mockito.*;
  * PayslipFlowService methods. No more .block() calls or Mono.empty()
  * stubs anywhere.
  *
- * WORKSTREAM C (persistence): RegisteredUserStore is now Postgres-backed
- * - userStore here is wired to a fake, in-memory-backed repository (see
- * FakeRepositories) so it keeps behaving like a real, working
- * collaborator, exactly as it did with the old ConcurrentHashMap.
+ * WORKSTREAM C (persistence): RegisteredUserStore and DocumentStore are
+ * now Postgres-backed - both are wired to fake, in-memory-backed
+ * repositories (see FakeRepositories) so they keep behaving like real,
+ * working collaborators, exactly as they did with the old
+ * ConcurrentHashMap.
  */
 @ExtendWith(MockitoExtension.class)
 class PayslipFlowServiceTest {
@@ -40,6 +43,8 @@ class PayslipFlowServiceTest {
     private WhatsAppMessageService messageService;
     @Mock
     private RegisteredUserRepository registeredUserRepository;
+    @Mock
+    private DocumentRepository documentRepository;
 
     private RegisteredUserStore userStore;
     private DocumentStore documentStore;
@@ -50,7 +55,8 @@ class PayslipFlowServiceTest {
     void setUp() {
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
         userStore = new RegisteredUserStore(registeredUserRepository);
-        documentStore = new DocumentStore();
+        FakeRepositories.wireAsInMemoryStore(documentRepository, StoredDocument::getToken);
+        documentStore = new DocumentStore(documentRepository);
         documentHtmlService = new DocumentHtmlService();
         WhatsAppProperties properties = new WhatsAppProperties(
                 "test_token", "test_phone_id", "test_verify_token", "test_secret",
