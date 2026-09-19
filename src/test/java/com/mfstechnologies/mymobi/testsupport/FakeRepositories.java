@@ -8,8 +8,7 @@ import java.util.function.Function;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 /**
  * WORKSTREAM C (persistence): a small, reusable helper for tests that
@@ -27,6 +26,15 @@ import static org.mockito.Mockito.when;
  * unstubbed mock methods is exactly correct here, since nothing in this
  * codebase calls them - there's no need to implement the rest of the
  * interface just to satisfy it.
+ *
+ * All 4 stubs use lenient(): most individual test methods only exercise
+ * one or two of the four operations (e.g. a test that only reads never
+ * touches save/exists/delete), and Mockito's strict-stubs mode
+ * (MockitoExtension's default) treats any stub a given test never
+ * actually invokes as an UnnecessaryStubbingException. lenient() is the
+ * documented, intended way to opt a shared setup helper like this one
+ * out of that check, since "not every test uses every stub" is expected
+ * and correct here, not a mistake to be flagged.
  *
  * Usage in a test:
  *   @Mock
@@ -46,23 +54,23 @@ public final class FakeRepositories {
     public static <T, ID> void wireAsInMemoryStore(JpaRepository<T, ID> mockRepository, Function<T, ID> idExtractor) {
         Map<ID, T> backing = new HashMap<>();
 
-        when(mockRepository.findById(any())).thenAnswer(invocation -> {
+        lenient().when(mockRepository.findById(any())).thenAnswer(invocation -> {
             ID id = invocation.getArgument(0);
             return Optional.ofNullable(backing.get(id));
         });
 
-        when(mockRepository.save(any())).thenAnswer(invocation -> {
+        lenient().when(mockRepository.save(any())).thenAnswer(invocation -> {
             T entity = invocation.getArgument(0);
             backing.put(idExtractor.apply(entity), entity);
             return entity;
         });
 
-        when(mockRepository.existsById(any())).thenAnswer(invocation -> {
+        lenient().when(mockRepository.existsById(any())).thenAnswer(invocation -> {
             ID id = invocation.getArgument(0);
             return backing.containsKey(id);
         });
 
-        doAnswer(invocation -> {
+        lenient().doAnswer(invocation -> {
             ID id = invocation.getArgument(0);
             backing.remove(id);
             return null;
