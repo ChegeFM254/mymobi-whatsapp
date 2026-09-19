@@ -166,17 +166,28 @@ class ConversationServiceTest {
     }
 
     @Test
-    void unmappedTextStepWhenNotAuthenticatedShowsWelcomeAndDropsSession() {
+    void unmappedTextStepWhenNotAuthenticatedShowsWelcomeAndResetsSession() {
         UserSession session = new UserSession(); // authenticated=false
         session.setStep("some_stale_unrecognized_step");
+        session.setFirstName("LeftoverFromEarlier"); // proves reset() actually clears fields, not just step
         when(sessionStore.getOrCreate(FROM)).thenReturn(session);
 
         IncomingMessage message = new IncomingMessage("wamid.11", FROM, "gibberish", null);
-                conversationService.handleIncomingMessage(message);
+
+        conversationService.handleIncomingMessage(message);
 
         verify(messageService).sendTextMessage(eq(FROM), eq("Sorry, something went wrong. Let's start over."));
         verify(screenService).sendWelcome(FROM);
-        verify(sessionStore).delete(FROM);
+        // WORKSTREAM C (persistence): no longer sessionStore.delete(FROM) -
+        // with Redis, the finally block in handleIncomingMessage() would
+        // just save this same object straight back afterward, silently
+        // undoing a delete(). session.reset() achieves the same
+        // "looks brand new" outcome directly on the object being saved.
+        assertThat(session.getStep()).isEqualTo("welcome");
+        assertThat(session.isNewSession()).isTrue();
+        assertThat(session.getFirstName()).isNull();
+        verify(sessionStore).save(FROM, session);
+        verify(sessionStore, never()).delete(anyString());
     }
 
     @Test
