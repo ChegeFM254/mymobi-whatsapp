@@ -192,33 +192,17 @@ class RegistrationFlowServiceTest {
         assertThat(session.getNationalId()).isNull();
     }
 
-    @Test
-    void validNationalIdAdvancesToMobileNumber() {
+        @Test
+    void validNationalIdAutoPopulatesMobileNumberFromWhatsAppAndGoesStraightToConfirmation() {
         UserSession session = new UserSession();
 
         registrationFlowService.handleNationalId(FROM, "87654321", session);
 
         assertThat(session.getNationalId()).isEqualTo("87654321");
-        assertThat(session.getStep()).isEqualTo("mobile_number");
-    }
-
-    @Test
-    void validMobileNumberAdvancesToConfirmation() {
-        UserSession session = new UserSession();
-
-        registrationFlowService.handleMobileNumber(FROM, "0722730336", session);
-
-        assertThat(session.getMobileNumber()).isEqualTo("0722730336");
+        // WORKSTREAM D: Mobile Number comes from WhatsApp's own sender
+        // number, not a typed step - straight to Confirmation from here.
+        assertThat(session.getMobileNumber()).isEqualTo(FROM);
         verify(screenService).sendConfirmation(FROM, session);
-    }
-
-    @Test
-    void invalidMobileNumberIsRejected() {
-        UserSession session = new UserSession();
-
-        registrationFlowService.handleMobileNumber(FROM, "12345", session);
-        
-        assertThat(session.getMobileNumber()).isNull();
     }
 
     // ==================== CONFIRM / EDIT ====================
