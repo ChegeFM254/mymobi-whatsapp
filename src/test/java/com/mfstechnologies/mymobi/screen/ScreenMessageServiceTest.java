@@ -326,12 +326,14 @@ class ScreenMessageServiceTest {
     // ==================== sendEditOptions ====================
 
     @Test
-    void editOptionsIncludesAllSevenFieldsPlusExit() {
+        void editOptionsIncludesAllSixEditableFieldsPlusExit() {
         screenService.sendEditOptions(FROM);
 
+        // WORKSTREAM D: Mobile Number is no longer editable here - it
+        // now only comes from WhatsApp itself or an admin backend change.
         assertThat(capturedRowIds()).containsExactly(
                 "edit_firstname", "edit_middlename", "edit_lastname",
-                "edit_emailaddress", "edit_upn", "edit_nationalid", "edit_mobilenumber",
+                "edit_emailaddress", "edit_upn", "edit_nationalid",
                 "exit_edit"
         );
     }
