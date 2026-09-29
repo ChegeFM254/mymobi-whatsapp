@@ -2,7 +2,6 @@ package com.mfstechnologies.mymobi.service;
 
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
-import com.mfstechnologies.mymobi.validation.CodeGenerator;
 import com.mfstechnologies.mymobi.validation.FieldValidators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,13 +11,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * WORKSTREAM B (reactive -> synchronous): every method here used to
- * return Mono<Void>, chaining with .then(). All converted to plain
- * blocking void methods with sequential statements. The two background
- * CompletableFuture blocks (deliverCodeAfterDelay, handleLogout) used to
- * catch send errors via .doOnError().subscribe() - since
- * sendTextMessage() now throws directly instead of carrying errors on a
- * reactive error channel, those became plain try/catch blocks instead.
+ * WORKSTREAM D (login/registration simplification): the Verification
+ * Code step has been removed from login entirely - login is now just
+ * UPN -> PIN -> authenticated, matching the product decision to drop
+ * the extra step. handleLoginEnterVerificationCode, the code-generation/
+ * delivery logic (CodeGenerator, deliverCodeAfterDelay), and the
+ * "login_enter_verification_code" step are all gone rather than kept
+ * dormant, since nothing references them anymore.
  */
 @Service
 public class AuthenticationFlowService {
@@ -82,7 +81,7 @@ public class AuthenticationFlowService {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
             messageService.sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
             return;
-                    }
+        }
 
         LoginVerificationService.LoginResult result = loginVerificationService.verify(to, session.getLoginUpn(), text);
 
@@ -91,28 +90,8 @@ public class AuthenticationFlowService {
             return;
         }
 
-        String code = CodeGenerator.generateFiveDigitCode();
-        session.setVerificationCode(code);
-        session.setStep("login_enter_verification_code");
-
-        deliverCodeAfterDelay(to, code);
-        messageService.sendTextMessage(to, "Enter Verification Code:");
-    }
-
-    public void handleLoginEnterVerificationCode(String to, String text, UserSession session) {
-        if (!FieldValidators.isValidFiveDigitCode(text)) {
-            messageService.sendTextMessage(to, "Invalid code. Please enter a 5-digit verification code.");
-            return;
-        }
-
-        if (!text.equals(session.getVerificationCode())) {
-            recordFailedAttemptAndRespond(to, session, "Incorrect code.");
-            return;
-        }
-
-        // UPN + PIN + Verification Code all correct.
+        // UPN + PIN correct - login complete, no Verification Code step.
         session.setLoginAttempts(0);
-        session.setVerificationCode(null);
         session.setLoginUpn(null);
         session.setAuthenticated(true);
         screenService.sendWelcome(to);
@@ -125,7 +104,6 @@ public class AuthenticationFlowService {
             lockoutService.applyLockout(to);
             session.setStep("welcome");
             session.setLoginUpn(null);
-            session.setVerificationCode(null);
             messageService.sendTextMessage(to,
                     "Too many incorrect attempts. Your account has been temporarily locked for 10 minutes.");
             screenService.sendHomeScreen(to, session);
@@ -134,19 +112,6 @@ public class AuthenticationFlowService {
 
         int attemptsLeft = LoginLockoutService.MAX_LOGIN_ATTEMPTS - session.getLoginAttempts();
         messageService.sendTextMessage(to, reasonPrefix + " You have " + attemptsLeft + " attempt(s) remaining.");
-    }
-
-    private void deliverCodeAfterDelay(String to, String code) {
-        CompletableFuture.runAsync(
-                () -> {
-                    try {
-                        messageService.sendTextMessage(to, "Verification Code " + code);
-                    } catch (Exception err) {
-                        log.error("Failed to deliver simulated verification code to {}: {}", to, err.getMessage());
-                    }
-                },
-                CompletableFuture.delayedExecutor(5, TimeUnit.SECONDS)
-        );
     }
 
     public void handleLogout(String to, UserSession session) {
