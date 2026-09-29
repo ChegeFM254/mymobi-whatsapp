@@ -16,18 +16,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The full Registration/KYC flow - OptIn, Terms, 7 KYC fields (with
- * Confirm/Edit), OTP verification, and new PIN setup. Direct equivalent
- * of the corresponding sections of handleButton() / handleTextInput()
- * in the Node.js version, extended with Middle Name and Email Address -
- * two fields Node never had.
+ * The full Registration/KYC flow - OptIn, Terms, 6 typed KYC fields plus
+ * Mobile Number auto-populated from WhatsApp (with Confirm/Edit), OTP
+ * verification, and new PIN setup. Direct equivalent of the
+ * corresponding sections of handleButton() / handleTextInput() in the
+ * Node.js version, extended with Middle Name and Email Address - two
+ * fields Node never had.
  *
- * KYC collection order (per product decision): the ORIGINAL five fields
- * keep their original relative order exactly as before (First Name,
- * Last Name, UPN Number, National ID Number, Mpesa Mobile Number) - the
- * two new fields are inserted at specific points, nothing else moved:
- * First Name, Middle Name, Last Name, Email Address, UPN Number,
- * National ID Number, Mpesa Mobile Number.
+ * KYC collection order: First Name, Middle Name, Last Name, Email
+ * Address, UPN Number, National ID Number, then straight to
+ * Confirmation - Mobile Number is no longer a typed step (see
+ * WORKSTREAM D below).
  *
  * This is the largest single flow in the whole application - deliberately
  * given its own dedicated session, following the same incremental,
@@ -39,6 +38,17 @@ import java.util.concurrent.TimeUnit;
  * deliverOtpAfterDelay's error handling changed from .doOnError().
  * subscribe() to a plain try/catch, since sendTextMessage() now throws
  * directly instead of carrying errors on a reactive error channel.
+ *
+ * WORKSTREAM D (login/registration simplification): Mobile Number is no
+ * longer typed during registration - handleNationalId now auto-populates
+ * it directly from the WhatsApp sender's own number (the "to" parameter
+ * every method already receives) and goes straight to the confirmation
+ * screen. handleMobileNumber (the old typed-entry handler) is removed
+ * entirely, since nothing reaches that step anymore. Mobile Number is
+ * ALSO removed from the editable fields entirely (EDIT_FIELD_LABELS,
+ * the edit_mobilenumber switch case, and its validation) - it can now
+ * only be changed by an admin directly, not by the person themselves via
+ * Edit Details.
  */
 @Service
 public class RegistrationFlowService {
@@ -52,9 +62,8 @@ public class RegistrationFlowService {
             "edit_lastname", "Last Name",
             "edit_emailaddress", "Email Address",
             "edit_upn", "UPN Number",
-            "edit_nationalid", "National ID Number",
-            "edit_mobilenumber", "Mpesa Mobile Number"
-    );
+            "edit_nationalid", "National ID Number"
+            );
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
@@ -63,7 +72,7 @@ public class RegistrationFlowService {
 
     public RegistrationFlowService(
             ScreenMessageService screenService,
-                    WhatsAppMessageService messageService,
+            WhatsAppMessageService messageService,
             RegisteredUserStore userStore,
             PasswordEncoder passwordEncoder
     ) {
@@ -110,16 +119,15 @@ public class RegistrationFlowService {
 
     // ==================== KYC FIELD COLLECTION ====================
     // Order: First Name -> Middle Name -> Last Name -> Email Address ->
-    // UPN Number -> National ID Number -> Mpesa Mobile Number -> Confirmation.
-    // The five original fields keep their exact original relative order;
-    // only Middle Name and Email Address are newly inserted.
+    // UPN Number -> National ID Number -> Confirmation (Mobile Number is
+    // auto-populated from WhatsApp, not a typed step - see WORKSTREAM D).
 
     public void handleFirstName(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
             messageService.sendTextMessage(to, "Please enter your First Name.");
             return;
         }
-        session.setFirstName(text);
+                session.setFirstName(text);
         session.setStep("middle_name");
         messageService.sendTextMessage(to, "Enter Middle Name");
     }
@@ -128,7 +136,7 @@ public class RegistrationFlowService {
         if (text == null || text.isBlank()) {
             messageService.sendTextMessage(to, "Please enter your Middle Name.");
             return;
-                    }
+        }
         session.setMiddleName(text);
         session.setStep("last_name");
         messageService.sendTextMessage(to, "Enter Last Name");
@@ -182,21 +190,10 @@ public class RegistrationFlowService {
             return;
         }
         session.setNationalId(text);
-        session.setStep("mobile_number");
-        messageService.sendTextMessage(to, "Enter Mpesa Mobile Number");
-    }
-
-    public void handleMobileNumber(String to, String text, UserSession session) {
-        if (text == null || text.isBlank()) {
-            messageService.sendTextMessage(to, "Please enter your Mobile Number (Mpesa).");
-            return;
-        }
-        if (!FieldValidators.isValidMobileNumber(text)) {
-            messageService.sendTextMessage(to,
-                                    "Mobile Number should be 10 digits starting with 0 (e.g. 0722730336) or 12 digits starting with 254 (e.g. 254722730336). Please try again.");
-            return;
-        }
-        session.setMobileNumber(text);
+        // WORKSTREAM D: Mobile Number comes directly from WhatsApp itself
+        // (the sender's own number) rather than being typed - straight to
+                // Confirmation from here.
+        session.setMobileNumber(to);
         screenService.sendConfirmation(to, session);
     }
 
@@ -242,11 +239,6 @@ public class RegistrationFlowService {
             messageService.sendTextMessage(to, "National ID should be exactly 8 digits and cannot start with 0. Please try again.");
             return;
         }
-        if ("edit_mobilenumber".equals(step) && !FieldValidators.isValidMobileNumber(text)) {
-            messageService.sendTextMessage(to,
-                    "Mobile Number should be 10 digits starting with 0 (e.g. 0722730336) or 12 digits starting with 254 (e.g. 254722730336). Please try again.");
-            return;
-        }
         if ("edit_emailaddress".equals(step) && !FieldValidators.isValidEmail(text)) {
             messageService.sendTextMessage(to, "Please enter a valid Email Address (e.g. name@example.com).");
             return;
@@ -258,15 +250,13 @@ public class RegistrationFlowService {
             case "edit_lastname" -> session.setLastName(text);
             case "edit_emailaddress" -> session.setEmailAddress(text);
             case "edit_upn" -> session.setUpn(text);
-                            case "edit_nationalid" -> session.setNationalId(text);
-            case "edit_mobilenumber" -> session.setMobileNumber(text);
+            case "edit_nationalid" -> session.setNationalId(text);
             default -> log.warn("Unexpected edit step {} for {}", step, to);
         }
 
         screenService.sendConfirmation(to, session);
     }
-
-    // ==================== OTP ====================
+        // ==================== OTP ====================
 
     public void handleEnterOtp(String to, String text, UserSession session) {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
@@ -317,7 +307,8 @@ public class RegistrationFlowService {
             messageService.sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
             return;
         }
-                completeRegistration(to, session);
+
+        completeRegistration(to, session);
     }
 
     private void completeRegistration(String to, UserSession session) {
@@ -330,7 +321,7 @@ public class RegistrationFlowService {
         user.setNationalId(session.getNationalId());
         user.setMobileNumber(session.getMobileNumber());
         user.setHashedPin(passwordEncoder.encode(session.getNewPin()));
-        user.setStatus("active");
+                user.setStatus("active");
         userStore.save(to, user);
 
         log.info("user_registered to={} firstName={} lastName={}", to, session.getFirstName(), session.getLastName());
@@ -357,9 +348,8 @@ public class RegistrationFlowService {
 
     /**
      * Simulates SMS delivery of the OTP, arriving as a separate WhatsApp
-     * message a few seconds later - same testing pattern used for the
-     * Verification Code in AuthenticationFlowService. TODO: remove once
-     * a real SMS/backend delivers this for real.
+     * message a few seconds later. TODO: remove once a real SMS/backend
+     * delivers this for real.
      */
     private void deliverOtpAfterDelay(String to, String otp) {
         CompletableFuture.runAsync(
@@ -374,3 +364,4 @@ public class RegistrationFlowService {
         );
     }
 }
+        
