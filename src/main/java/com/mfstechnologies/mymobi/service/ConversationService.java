@@ -32,8 +32,8 @@ public class ConversationService {
 
     private static final Duration DEBOUNCE = Duration.ofMillis(800);
 
-    private static final Set<String> EDIT_FIELD_IDS = Set.of(
-            "edit_firstname", "edit_middlename", "edit_lastname", "edit_mobilenumber",
+        private static final Set<String> EDIT_FIELD_IDS = Set.of(
+            "edit_firstname", "edit_middlename", "edit_lastname",
             "edit_emailaddress", "edit_upn", "edit_nationalid"
     );
 
@@ -234,7 +234,6 @@ public class ConversationService {
         switch (step) {
             case "login_enter_upn" -> authFlowService.handleLoginEnterUpn(to, text, session);
             case "login_enter_pin" -> authFlowService.handleLoginEnterPin(to, text, session);
-            case "login_enter_verification_code" -> authFlowService.handleLoginEnterVerificationCode(to, text, session);
 
             case "first_name" -> registrationFlowService.handleFirstName(to, text, session);
             case "middle_name" -> registrationFlowService.handleMiddleName(to, text, session);
@@ -242,7 +241,6 @@ public class ConversationService {
             case "email_address" -> registrationFlowService.handleEmailAddress(to, text, session);
             case "upn" -> registrationFlowService.handleUpnField(to, text, session);
             case "national_id" -> registrationFlowService.handleNationalId(to, text, session);
-            case "mobile_number" -> registrationFlowService.handleMobileNumber(to, text, session);
             case "enter_otp" -> registrationFlowService.handleEnterOtp(to, text, session);
             case "enter_new_pin" -> registrationFlowService.handleEnterNewPin(to, text, session);
             case "confirm_new_pin" -> registrationFlowService.handleConfirmNewPin(to, text, session);
