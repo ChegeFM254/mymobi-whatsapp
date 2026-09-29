@@ -34,6 +34,12 @@ import static org.mockito.Mockito.*;
  * FakeRepositories), so every place that used to construct a plain
  * `new RegisteredUserStore()` still gets its own working, independent
  * collaborator.
+ *
+ * WORKSTREAM D (login/registration simplification): the Verification
+ * Code step is gone from login - correctPinAdvancesToVerificationCodeStep
+ * is replaced with correctPinAuthenticatesImmediately below, and both
+ * verification-code-specific tests are removed entirely, since there's
+ * no longer any such step to test.
  */
 @ExtendWith(MockitoExtension.class)
 class AuthenticationFlowServiceTest {
@@ -58,11 +64,11 @@ class AuthenticationFlowServiceTest {
     }
 
     @BeforeEach
-        void setUp() {
+    void setUp() {
         lockoutService = new LoginLockoutService(600);
         PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
         loginVerificationService = new LoginVerificationService(
-                freshUserStore(),
+                            freshUserStore(),
                 passwordEncoder,
                 true
         );
@@ -117,7 +123,8 @@ class AuthenticationFlowServiceTest {
         session.setStep("login_enter_upn");
 
         authFlowService.handleLoginEnterUpn(FROM, "notanumber", session);
-                assertThat(session.getStep()).isEqualTo("login_enter_upn");
+
+        assertThat(session.getStep()).isEqualTo("login_enter_upn");
         verify(messageService).sendTextMessage(eq(FROM), contains("UPN"));
     }
 
@@ -131,19 +138,19 @@ class AuthenticationFlowServiceTest {
         assertThat(session.getStep()).isEqualTo("login_enter_pin");
         assertThat(session.getLoginUpn()).isEqualTo("12345");
         verify(messageService).sendTextMessage(FROM, "Enter PIN:");
-    }
+            }
 
     @Test
-    void correctPinAdvancesToVerificationCodeStep() {
+    void correctPinAuthenticatesImmediately() {
         UserSession session = new UserSession();
         session.setStep("login_enter_pin");
         session.setLoginUpn("12345");
 
         authFlowService.handleLoginEnterPin(FROM, "54321", session);
 
-        assertThat(session.getStep()).isEqualTo("login_enter_verification_code");
-        assertThat(session.getVerificationCode()).isNotNull();
-        verify(messageService).sendTextMessage(FROM, "Enter Verification Code:");
+        assertThat(session.isAuthenticated()).isTrue();
+        assertThat(session.getLoginUpn()).isNull(); // cleared after use
+        verify(screenService).sendWelcome(FROM);
     }
 
     @Test
@@ -172,7 +179,7 @@ class AuthenticationFlowServiceTest {
         var realUser = new com.mfstechnologies.mymobi.model.RegisteredUser();
         realUser.setUpn("19999999");
         realUser.setHashedPin(new BCryptPasswordEncoder().encode("11111"));
-                var userStore = freshUserStore();
+        var userStore = freshUserStore();
         userStore.save(FROM, realUser);
         var realLoginService = new LoginVerificationService(userStore, new BCryptPasswordEncoder(), true);
         var flowWithRealUser = new AuthenticationFlowService(screenService, messageService, lockoutService, realLoginService, inactivityTimeoutService);
@@ -187,31 +194,6 @@ class AuthenticationFlowServiceTest {
         assertThat(lockoutService.getLockoutMinutesRemaining(FROM)).isGreaterThan(0);
         verify(messageService).sendTextMessage(eq(FROM), contains("locked for 10 minutes"));
         verify(screenService).sendHomeScreen(FROM, session);
-    }
-
-    @Test
-    void correctVerificationCodeCompletesLoginAndShowsWelcomeScreen() {
-        UserSession session = new UserSession();
-        session.setStep("login_enter_verification_code");
-        session.setVerificationCode("98765");
-
-        authFlowService.handleLoginEnterVerificationCode(FROM, "98765", session);
-
-        assertThat(session.isAuthenticated()).isTrue();
-        assertThat(session.getVerificationCode()).isNull(); // cleared after use
-        verify(screenService).sendWelcome(FROM);
-    }
-
-    @Test
-    void wrongVerificationCodeDoesNotAuthenticateTheSession() {
-        UserSession session = new UserSession();
-        session.setStep("login_enter_verification_code");
-        session.setVerificationCode("98765");
-
-        authFlowService.handleLoginEnterVerificationCode(FROM, "00000", session);
-
-        assertThat(session.isAuthenticated()).isFalse();
-        verify(screenService, never()).sendMainMenu(anyString());
     }
 
     @Test
