@@ -21,7 +21,6 @@ public class UserSession {
 
     private int loginAttempts = 0;
     private String loginUpn;
-    private String verificationCode;
 
     private String firstName;
     private String middleName;
@@ -70,7 +69,6 @@ public class UserSession {
         this.authenticated = false;
         this.loginAttempts = 0;
         this.loginUpn = null;
-        this.verificationCode = null;
         this.firstName = null;
         this.middleName = null;
         this.lastName = null;
@@ -108,9 +106,6 @@ public class UserSession {
 
     public String getLoginUpn() { return loginUpn; }
     public void setLoginUpn(String loginUpn) { this.loginUpn = loginUpn; }
-
-    public String getVerificationCode() { return verificationCode; }
-    public void setVerificationCode(String verificationCode) { this.verificationCode = verificationCode; }
 
     public String getFirstName() { return firstName; }
     public void setFirstName(String firstName) { this.firstName = firstName; }
