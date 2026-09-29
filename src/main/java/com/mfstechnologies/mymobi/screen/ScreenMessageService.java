@@ -305,7 +305,6 @@ public class ScreenMessageService {
                                                 Map.of("id", "edit_emailaddress", "title", "Email Address", "description", "Update your email address"),
                                                 Map.of("id", "edit_upn", "title", "UPN Number", "description", "Update your UPN"),
                                                 Map.of("id", "edit_nationalid", "title", "National ID Number", "description", "Update your National ID"),
-                                                Map.of("id", "edit_mobilenumber", "title", "Mpesa Mobile Number", "description", "Update your M-Pesa number"),
                                                 Map.of("id", "exit_edit", "title", "Exit", "description", "Return to Confirm Details")
                                         )
                                 ))
