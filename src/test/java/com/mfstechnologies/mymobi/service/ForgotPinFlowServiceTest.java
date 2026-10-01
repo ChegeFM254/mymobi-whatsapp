@@ -33,6 +33,12 @@ import static org.mockito.Mockito.*;
  * - userStore here is wired to a fake, in-memory-backed repository (see
  * FakeRepositories) so it keeps behaving like a real, working
  * collaborator, exactly as it did with the old ConcurrentHashMap.
+ *
+ * WORKSTREAM E (WhatsApp Flows webview for PIN/OTP/Approval Code): every
+ * OTP/PIN entry point now goes through screenService.sendCodeEntryFlow()
+ * instead of a plain text prompt - including every retry path, which
+ * must re-send the Flow so the person never has to fall back to typing
+ * the value directly into the chat.
  */
 @ExtendWith(MockitoExtension.class)
 class ForgotPinFlowServiceTest {
@@ -57,7 +63,7 @@ class ForgotPinFlowServiceTest {
         userStore = new RegisteredUserStore(registeredUserRepository);
         lockoutService = new LoginLockoutService(600);
         forgotPinFlowService = new ForgotPinFlowService(screenService, messageService, userStore, passwordEncoder, lockoutService);
-    }
+            }
 
     @Test
     void noAccountFoundReturnsAHelpfulMessage() {
@@ -88,6 +94,8 @@ class ForgotPinFlowServiceTest {
 
         assertThat(session.getStep()).isEqualTo("forgot_pin_enter_otp");
         assertThat(session.getOtp()).matches("^\\d{5}$");
+        // WORKSTREAM E: OTP entry now goes through the Flow webview.
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
@@ -98,6 +106,21 @@ class ForgotPinFlowServiceTest {
         forgotPinFlowService.handleEnterOtp(FROM, "12345", session);
 
         assertThat(session.getStep()).isEqualTo("forgot_pin_enter_new_pin");
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
+    }
+
+    @Test
+    void wrongOtpBelowMaxAttemptsResendsTheFlowForARetry() {
+        UserSession session = new UserSession();
+        session.setOtp("12345");
+
+        forgotPinFlowService.handleEnterOtp(FROM, "00000", session);
+
+        assertThat(session.getOtpAttempts()).isEqualTo(1);
+        verify(messageService).sendTextMessage(eq(FROM), org.mockito.ArgumentMatchers.contains("2 attempt(s) remaining"));
+        // WORKSTREAM E: the Flow must be re-sent so the retry also
+        // happens securely, not by falling back to typing in chat.
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
@@ -105,7 +128,7 @@ class ForgotPinFlowServiceTest {
         UserSession session = new UserSession();
         session.setOtp("12345");
         session.setOtpAttempts(2);
-
+        
         forgotPinFlowService.handleEnterOtp(FROM, "00000", session);
 
         assertThat(lockoutService.getLockoutMinutesRemaining(FROM)).isGreaterThan(0);
@@ -121,6 +144,9 @@ class ForgotPinFlowServiceTest {
         forgotPinFlowService.handleEnterNewPin(FROM, "12345", session);
 
         assertThat(session.getNewPin()).isNull();
+        // WORKSTREAM E: the Flow must be re-sent so the retry also
+        // happens securely, not by falling back to typing in chat.
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
@@ -149,5 +175,9 @@ class ForgotPinFlowServiceTest {
         forgotPinFlowService.handleConfirmNewPin(FROM, "11111", session);
 
         assertThat(session.getStep()).isEqualTo("forgot_pin_enter_new_pin");
+        // WORKSTREAM E: the Flow must be re-sent so the retry also
+        // happens securely, not by falling back to typing in chat.
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 }
+        
