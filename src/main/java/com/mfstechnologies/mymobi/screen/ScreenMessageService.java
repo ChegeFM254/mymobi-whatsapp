@@ -20,11 +20,19 @@ import java.util.Map;
  * use the interactive "list" type instead. Keep this in mind for every
  * screen added here.
  *
- * WORKSTREAM B (reactive -> synchronous): every method here used to
+  * WORKSTREAM B (reactive -> synchronous): every method here used to
  * return Mono<Void>, simply forwarding whatever WhatsAppMessageService
  * returned. Now that WhatsAppMessageService's send methods are plain
  * blocking void calls, these are too - no Mono wrapping needed anywhere
  * in this class.
+ *
+ * WORKSTREAM E (WhatsApp Flows webview for PIN/OTP/Approval Code):
+ * sendCodeEntryFlow() sends the reusable PIN/OTP/Approval Code entry
+ * Flow, instead of a plain text prompt - keeps the sensitive value out
+ * of the visible chat log entirely. One single Flow (screen id
+ * CODE_ENTRY) is reused for every case; only the prompt text and CTA
+ * button label change per call. See IncomingMessage.parse() for how the
+ * submitted value flows back in as ordinary text.
  */
 @Service
 public class ScreenMessageService {
@@ -32,15 +40,62 @@ public class ScreenMessageService {
     private final WhatsAppMessageService messageService;
     private final com.mfstechnologies.mymobi.session.LoanStore loanStore;
     private final com.mfstechnologies.mymobi.session.RegisteredUserStore userStore;
+    private final String flowId;
 
     public ScreenMessageService(
             WhatsAppMessageService messageService,
             com.mfstechnologies.mymobi.session.LoanStore loanStore,
-            com.mfstechnologies.mymobi.session.RegisteredUserStore userStore
+            com.mfstechnologies.mymobi.session.RegisteredUserStore userStore,
+            @org.springframework.beans.factory.annotation.Value("${whatsapp.flow-id:}") String flowId
     ) {
         this.messageService = messageService;
         this.loanStore = loanStore;
         this.userStore = userStore;
+        this.flowId = flowId;
+    }
+
+    /**
+     * Sends the reusable PIN/OTP/Approval Code entry WhatsApp Flow,
+     * instead of a plain text prompt.
+     *
+     * Deliberately does NOT rely on flow_token for routing the response
+     * back to the right handler - the response is instead folded into
+     * the ordinary text() field by IncomingMessage.parse() and routed by
+     * session.getStep(), exactly like typed input. flow_token here only
+     * satisfies Meta's requirement that each send include one; a random
+     * value is sufficient since nothing reads it back.
+     *
+     * Requires whatsapp.flow-id (env var WHATSAPP_FLOW_ID) to be set
+     * once the Flow has been created and published in Meta Business
+     * Manager, with a single screen (id CODE_ENTRY) containing a
+     * TextBody bound to data.prompt_text and a Form with a TextInput
+     * named "code".
+     */
+    public void sendCodeEntryFlow(String to, String promptText, String ctaText) {
+        Map<String, Object> payload = Map.of(
+                "messaging_product", "whatsapp",
+                "to", to,
+                "type", "interactive",
+                "interactive", Map.of(
+                        "type", "flow",
+                        "body", Map.of("text", promptText),
+                        "action", Map.of(
+                                "name", "flow",
+                                "parameters", Map.of(
+                                        "flow_message_version", "3",
+                                        "flow_token", java.util.UUID.randomUUID().toString(),
+                                        "flow_id", flowId,
+                                        "flow_cta", ctaText,
+                                        "flow_action", "navigate",
+                                        "flow_action_payload", Map.of(
+                                                "screen", "CODE_ENTRY",
+                                                "data", Map.of("prompt_text", promptText)
+                                        )
+                                )
+                        )
+                )
+        );
+        messageService.sendMessage(to, payload);
     }
 
     /**
