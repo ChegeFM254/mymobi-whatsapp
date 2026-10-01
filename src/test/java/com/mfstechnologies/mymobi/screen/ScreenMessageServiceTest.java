@@ -63,12 +63,12 @@ class ScreenMessageServiceTest {
     private ScreenMessageService screenService;
 
     @BeforeEach
-    void setUp() {
+        void setUp() {
         FakeRepositories.wireAsInMemoryStore(loanRepository, Loan::getPhoneNumber);
         loanStore = new LoanStore(loanRepository);
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
         userStore = new com.mfstechnologies.mymobi.session.RegisteredUserStore(registeredUserRepository);
-        screenService = new ScreenMessageService(messageService, loanStore, userStore);
+        screenService = new ScreenMessageService(messageService, loanStore, userStore, "test_flow_id");
         doNothing().when(messageService).sendMessage(eq(FROM), payloadCaptor.capture());
     }
 
@@ -79,7 +79,7 @@ class ScreenMessageServiceTest {
         Map<String, Object> action = (Map<String, Object>) interactive.get("action");
         List<Map<String, Object>> sections = (List<Map<String, Object>>) action.get("sections");
         List<Map<String, Object>> rows = (List<Map<String, Object>>) sections.get(0).get("rows");
-                return rows.stream().map(row -> (String) row.get("id")).toList();
+        return rows.stream().map(row -> (String) row.get("id")).toList();
     }
 
     @SuppressWarnings("unchecked")
@@ -128,7 +128,7 @@ class ScreenMessageServiceTest {
     void showsPayLoanWhenApproved() {
         Loan loan = new Loan();
         loan.setStatus("approved");
-        loanStore.save(FROM, loan);
+                loanStore.save(FROM, loan);
 
         screenService.sendMainMenu(FROM);
 
@@ -149,7 +149,7 @@ class ScreenMessageServiceTest {
     @Test
     void alwaysIncludesTheStandardNavigationRows() {
         screenService.sendMainMenu(FROM);
-        
+
         List<String> rowIds = capturedRowIds();
         assertThat(rowIds).contains("payslip_menu", "loan_statement_menu", "loan_clearance_menu", "back", "home", "logout");
     }
@@ -193,7 +193,7 @@ class ScreenMessageServiceTest {
         screenService.sendLoanBreakdown(FROM, breakdown, 3);
 
         assertThat(capturedBodyText()).isEqualTo(
-                "Loan Amount: KES 60,000\n" +
+                            "Loan Amount: KES 60,000\n" +
                 "Upfront Fees: KES 6,842\n" +
                 "You Receive: KES 53,158\n" +
                 "Loan Period: 3 Months\n" +
@@ -219,7 +219,7 @@ class ScreenMessageServiceTest {
     @Test
     void approveLoanDetailsMatchesTheExactRequestedWording() {
         Loan loan = new Loan();
-                loan.setLoanAmount(60000);
+        loan.setLoanAmount(60000);
         loan.setTenureMonths(3);
         loan.setDueDate("2026-10-23");
         loan.setStatus("pending_approval");
@@ -257,7 +257,6 @@ class ScreenMessageServiceTest {
     }
 
     // ==================== sendWelcome personalization ====================
-
     @Test
     void welcomeGreetsByNameWhenARegisteredUserExists() {
         var user = new com.mfstechnologies.mymobi.model.RegisteredUser();
@@ -279,7 +278,7 @@ class ScreenMessageServiceTest {
 
         assertThat(capturedHeaderText()).isEqualTo("Welcome to MyMobi [Java]");
         assertThat(capturedHasFooter()).isFalse();
-            }
+    }
 
     // ==================== sendConfirmation ====================
 
@@ -322,11 +321,10 @@ class ScreenMessageServiceTest {
         assertThat(upnIndex).isLessThan(nationalIdIndex);
         assertThat(nationalIdIndex).isLessThan(mobileIndex);
     }
-
-    // ==================== sendEditOptions ====================
+        // ==================== sendEditOptions ====================
 
     @Test
-        void editOptionsIncludesAllSixEditableFieldsPlusExit() {
+    void editOptionsIncludesAllSixEditableFieldsPlusExit() {
         screenService.sendEditOptions(FROM);
 
         // WORKSTREAM D: Mobile Number is no longer editable here - it
@@ -336,5 +334,55 @@ class ScreenMessageServiceTest {
                 "edit_emailaddress", "edit_upn", "edit_nationalid",
                 "exit_edit"
         );
+    }
+
+    // ==================== sendCodeEntryFlow (WORKSTREAM E) ====================
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void codeEntryFlowSendsTheCorrectInteractiveFlowStructure() {
+        screenService.sendCodeEntryFlow(FROM, "Enter PIN:", "Enter PIN");
+
+        Map<String, Object> payload = payloadCaptor.getValue();
+        Map<String, Object> interactive = (Map<String, Object>) payload.get("interactive");
+        assertThat(interactive.get("type")).isEqualTo("flow");
+
+        Map<String, Object> body = (Map<String, Object>) interactive.get("body");
+        assertThat(body.get("text")).isEqualTo("Enter PIN:");
+
+        Map<String, Object> action = (Map<String, Object>) interactive.get("action");
+        assertThat(action.get("name")).isEqualTo("flow");
+
+        Map<String, Object> parameters = (Map<String, Object>) action.get("parameters");
+        assertThat(parameters.get("flow_id")).isEqualTo("test_flow_id");
+        assertThat(parameters.get("flow_cta")).isEqualTo("Enter PIN");
+        assertThat(parameters.get("flow_action")).isEqualTo("navigate");
+        assertThat(parameters.get("flow_token")).isNotNull();
+
+        Map<String, Object> actionPayload = (Map<String, Object>) parameters.get("flow_action_payload");
+        assertThat(actionPayload.get("screen")).isEqualTo("CODE_ENTRY");
+
+        Map<String, Object> data = (Map<String, Object>) actionPayload.get("data");
+        assertThat(data.get("prompt_text")).isEqualTo("Enter PIN:");
+    }
+
+    @Test
+    void codeEntryFlowUsesADifferentTokenOnEachSend() {
+        screenService.sendCodeEntryFlow(FROM, "Enter PIN:", "Enter PIN");
+        Object firstToken = extractFlowToken();
+
+        screenService.sendCodeEntryFlow(FROM, "Enter PIN:", "Enter PIN");
+        Object secondToken = extractFlowToken();
+
+        assertThat(firstToken).isNotEqualTo(secondToken);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object extractFlowToken() {
+        Map<String, Object> payload = payloadCaptor.getValue();
+        Map<String, Object> interactive = (Map<String, Object>) payload.get("interactive");
+        Map<String, Object> action = (Map<String, Object>) interactive.get("action");
+        Map<String, Object> parameters = (Map<String, Object>) action.get("parameters");
+        return parameters.get("flow_token");
     }
 }
