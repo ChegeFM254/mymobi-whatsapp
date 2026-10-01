@@ -74,7 +74,7 @@ public class AuthenticationFlowService {
 
         session.setLoginUpn(text);
         session.setStep("login_enter_pin");
-        messageService.sendTextMessage(to, "Enter PIN:");
+        screenService.sendCodeEntryFlow(to, "Enter PIN:", "Enter PIN");
     }
 
     public void handleLoginEnterPin(String to, String text, UserSession session) {
@@ -112,6 +112,10 @@ public class AuthenticationFlowService {
 
         int attemptsLeft = LoginLockoutService.MAX_LOGIN_ATTEMPTS - session.getLoginAttempts();
         messageService.sendTextMessage(to, reasonPrefix + " You have " + attemptsLeft + " attempt(s) remaining.");
+        // WORKSTREAM E: re-send the Flow so the retry also happens
+        // securely - without this, the person's only way to try again
+        // would be typing the PIN directly into the chat.
+        screenService.sendCodeEntryFlow(to, "Enter PIN:", "Enter PIN");
     }
 
     public void handleLogout(String to, UserSession session) {
