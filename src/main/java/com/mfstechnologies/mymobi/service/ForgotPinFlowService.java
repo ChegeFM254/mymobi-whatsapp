@@ -22,6 +22,14 @@ import java.util.concurrent.TimeUnit;
  * deliverOtpAfterDelay's error handling changed from .doOnError().
  * subscribe() to a plain try/catch, since sendTextMessage() now throws
  * directly instead of carrying errors on a reactive error channel.
+ *
+ * WORKSTREAM E (WhatsApp Flows webview for PIN/OTP/Approval Code): every
+ * OTP/PIN entry point here now goes through the WhatsApp Flow webview
+ * instead of a plain text prompt. Every retry path (wrong OTP, rejected
+ * new PIN, mismatched confirmation) also re-sends the Flow afterward -
+ * without that, the person's only way to retry would be falling back to
+ * typing the value directly into the chat, defeating the whole point of
+ * using the Flow in the first place.
  */
 @Service
 public class ForgotPinFlowService {
@@ -55,7 +63,7 @@ public class ForgotPinFlowService {
             messageService.sendTextMessage(to,
                     "Too many incorrect attempts. Your account is temporarily locked. Please try again in " + lockoutMinutes + " minute(s).");
             return;
-        }
+                    }
 
         Optional<RegisteredUser> existing = userStore.findByPhoneNumber(to);
         if (existing.isEmpty()) {
@@ -70,7 +78,7 @@ public class ForgotPinFlowService {
         session.setStep("forgot_pin_enter_otp");
 
         deliverOtpAfterDelay(to, otp);
-        messageService.sendTextMessage(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:");
+        screenService.sendCodeEntryFlow(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:", "Enter OTP");
     }
 
     public void handleEnterOtp(String to, String text, UserSession session) {
@@ -81,8 +89,8 @@ public class ForgotPinFlowService {
 
         if (text.equals(session.getOtp())) {
             session.setStep("forgot_pin_enter_new_pin");
-            messageService.sendTextMessage(to, "OTP verified. Please create a new 5-digit PIN:");
-                        return;
+            screenService.sendCodeEntryFlow(to, "OTP verified. Please create a new 5-digit PIN:", "Enter PIN");
+            return;
         }
 
         session.setOtpAttempts(session.getOtpAttempts() + 1);
@@ -98,27 +106,30 @@ public class ForgotPinFlowService {
 
         int attemptsLeft = MAX_OTP_ATTEMPTS - session.getOtpAttempts();
         messageService.sendTextMessage(to, "Incorrect OTP. You have " + attemptsLeft + " attempt(s) remaining.");
+        screenService.sendCodeEntryFlow(to, "Please enter the OTP:", "Enter OTP");
     }
 
     public void handleEnterNewPin(String to, String text, UserSession session) {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
             messageService.sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+            screenService.sendCodeEntryFlow(to, "Please create a new 5-digit PIN:", "Enter PIN");
             return;
         }
         if (text.equals(session.getOtp())) {
             messageService.sendTextMessage(to, "Your new PIN cannot be the same as the OTP. Please choose a different 5-digit PIN.");
+            screenService.sendCodeEntryFlow(to, "Please create a new 5-digit PIN:", "Enter PIN");
             return;
         }
 
         session.setNewPin(text);
         session.setStep("forgot_pin_confirm_new_pin");
-        messageService.sendTextMessage(to, "Please re-enter your new 5-digit PIN to confirm.");
+        screenService.sendCodeEntryFlow(to, "Please re-enter your new 5-digit PIN to confirm.", "Confirm PIN");
     }
 
     public void handleConfirmNewPin(String to, String text, UserSession session) {
         if (!text.equals(session.getNewPin())) {
-            session.setStep("forgot_pin_enter_new_pin");
-            messageService.sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
+                        session.setStep("forgot_pin_enter_new_pin");
+            screenService.sendCodeEntryFlow(to, "The PINs do not match. Please enter your new 5-digit PIN again:", "Enter PIN");
             return;
         }
 
@@ -152,6 +163,11 @@ public class ForgotPinFlowService {
         session.setNewPin(null);
     }
 
+    /**
+     * Simulates SMS delivery of the OTP, arriving as a separate WhatsApp
+     * message a few seconds later. TODO: remove once a real SMS/backend
+     * delivers this for real.
+     */
     private void deliverOtpAfterDelay(String to, String otp) {
         CompletableFuture.runAsync(
                 () -> {
@@ -165,3 +181,4 @@ public class ForgotPinFlowService {
         );
     }
 }
+            
