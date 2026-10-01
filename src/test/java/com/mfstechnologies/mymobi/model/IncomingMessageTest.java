@@ -91,4 +91,80 @@ class IncomingMessageTest {
         assertThat(message.hasText()).isFalse();
         assertThat(message.hasButton()).isFalse();
     }
+
+    @Test
+    void parsesAWhatsAppFlowSubmissionAsPlainText() throws Exception {
+        // WORKSTREAM E: the submitted "code" value is deliberately folded
+        // into the same text() field a typed reply would use - this is
+        // what lets the rest of the app treat a Flow submission (e.g.
+        // entering a PIN via the Flow) identically to typed text, with
+        // zero changes needed to step routing or validation.
+        JsonNode node = objectMapper.readTree("""
+                {
+                  "id": "wamid.FLOW123",
+                  "from": "254700000001",
+                  "type": "interactive",
+                  "interactive": {
+                    "type": "nfm_reply",
+                    "nfm_reply": {
+                      "name": "flow",
+                      "body": "Sent",
+                      "response_json": "{\\"flow_token\\":\\"abc123\\",\\"code\\":\\"54321\\"}"
+                    }
+                  }
+                }
+                """);
+
+        IncomingMessage message = IncomingMessage.parse(node);
+
+        assertThat(message.text()).isEqualTo("54321");
+        assertThat(message.hasText()).isTrue();
+        assertThat(message.hasButton()).isFalse();
+    }
+
+    @Test
+    void malformedFlowResponseJsonParsesAsNullRatherThanThrowing() throws Exception {
+        JsonNode node = objectMapper.readTree("""
+                {
+                  "id": "wamid.FLOWBAD",
+                  "from": "254700000001",
+                  "type": "interactive",
+                  "interactive": {
+                    "type": "nfm_reply",
+                    "nfm_reply": {
+                      "name": "flow",
+                      "response_json": "{not valid json"
+                    }
+                  }
+                }
+                """);
+
+        IncomingMessage message = IncomingMessage.parse(node);
+
+        assertThat(message.text()).isNull();
+        assertThat(message.hasText()).isFalse();
+    }
+
+    @Test
+    void flowResponseWithoutACodeFieldParsesAsNull() throws Exception {
+        JsonNode node = objectMapper.readTree("""
+                {
+                  "id": "wamid.FLOWNOCODE",
+                  "from": "254700000001",
+                  "type": "interactive",
+                  "interactive": {
+                    "type": "nfm_reply",
+                    "nfm_reply": {
+                      "name": "flow",
+                      "response_json": "{\\"flow_token\\":\\"abc123\\"}"
+                    }
+                  }
+                }
+                """);
+
+        IncomingMessage message = IncomingMessage.parse(node);
+
+        assertThat(message.text()).isNull();
+        assertThat(message.hasText()).isFalse();
+    }
 }
