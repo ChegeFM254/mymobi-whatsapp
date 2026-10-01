@@ -76,12 +76,15 @@ class OptOutFlowServiceTest {
     }
 
     @Test
-    void confirmingYesMovesToPinStep() {
+        void confirmingYesMovesToPinStep() {
         UserSession session = new UserSession();
 
         optOutFlowService.handleOptOutConfirmation(FROM, "yes", session);
 
         assertThat(session.getStep()).isEqualTo("opt_out_pin");
+        // WORKSTREAM E: PIN entry now goes through the WhatsApp Flow
+        // webview, not a plain text prompt.
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
