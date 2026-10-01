@@ -49,13 +49,21 @@ import java.util.concurrent.TimeUnit;
  * the edit_mobilenumber switch case, and its validation) - it can now
  * only be changed by an admin directly, not by the person themselves via
  * Edit Details.
+ *
+ * WORKSTREAM E (WhatsApp Flows webview for PIN/OTP/Approval Code): both
+ * OTP entry and new-PIN entry/confirmation now go through the WhatsApp
+ * Flow webview instead of a plain text prompt. Every retry path (wrong
+ * OTP, rejected new PIN, mismatched confirmation) also re-sends the Flow
+ * afterward - without that, the person's only way to retry would be
+ * falling back to typing the value directly into the chat, defeating the
+ * whole point of using the Flow in the first place.
  */
 @Service
 public class RegistrationFlowService {
 
     private static final Logger log = LoggerFactory.getLogger(RegistrationFlowService.class);
     private static final int MAX_OTP_ATTEMPTS = 3;
-
+    
     private static final Map<String, String> EDIT_FIELD_LABELS = Map.of(
             "edit_firstname", "First Name",
             "edit_middlename", "Middle Name",
@@ -63,7 +71,7 @@ public class RegistrationFlowService {
             "edit_emailaddress", "Email Address",
             "edit_upn", "UPN Number",
             "edit_nationalid", "National ID Number"
-            );
+    );
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
@@ -120,14 +128,14 @@ public class RegistrationFlowService {
     // ==================== KYC FIELD COLLECTION ====================
     // Order: First Name -> Middle Name -> Last Name -> Email Address ->
     // UPN Number -> National ID Number -> Confirmation (Mobile Number is
-    // auto-populated from WhatsApp, not a typed step - see WORKSTREAM D).
+        // auto-populated from WhatsApp, not a typed step - see WORKSTREAM D).
 
     public void handleFirstName(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
             messageService.sendTextMessage(to, "Please enter your First Name.");
             return;
         }
-                session.setFirstName(text);
+        session.setFirstName(text);
         session.setStep("middle_name");
         messageService.sendTextMessage(to, "Enter Middle Name");
     }
@@ -185,14 +193,14 @@ public class RegistrationFlowService {
             messageService.sendTextMessage(to, "Please enter your National ID Number.");
             return;
         }
-        if (!FieldValidators.isValidNationalId(text)) {
+                if (!FieldValidators.isValidNationalId(text)) {
             messageService.sendTextMessage(to, "National ID should be exactly 8 digits and cannot start with 0. Please try again.");
             return;
         }
         session.setNationalId(text);
         // WORKSTREAM D: Mobile Number comes directly from WhatsApp itself
         // (the sender's own number) rather than being typed - straight to
-                // Confirmation from here.
+        // Confirmation from here.
         session.setMobileNumber(to);
         screenService.sendConfirmation(to, session);
     }
@@ -206,7 +214,7 @@ public class RegistrationFlowService {
         session.setStep("enter_otp");
 
         deliverOtpAfterDelay(to, otp);
-        messageService.sendTextMessage(to, "An OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:");
+        screenService.sendCodeEntryFlow(to, "An OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:", "Enter OTP");
     }
 
     public void handleEditDetails(String to, UserSession session) {
@@ -250,13 +258,14 @@ public class RegistrationFlowService {
             case "edit_lastname" -> session.setLastName(text);
             case "edit_emailaddress" -> session.setEmailAddress(text);
             case "edit_upn" -> session.setUpn(text);
-            case "edit_nationalid" -> session.setNationalId(text);
+                            case "edit_nationalid" -> session.setNationalId(text);
             default -> log.warn("Unexpected edit step {} for {}", step, to);
         }
 
         screenService.sendConfirmation(to, session);
     }
-        // ==================== OTP ====================
+
+    // ==================== OTP ====================
 
     public void handleEnterOtp(String to, String text, UserSession session) {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
@@ -266,7 +275,7 @@ public class RegistrationFlowService {
 
         if (text.equals(session.getOtp())) {
             session.setStep("enter_new_pin");
-            messageService.sendTextMessage(to, "Create a new 5-digit PIN for your account.\n\nDo not share this PIN with anyone.");
+            screenService.sendCodeEntryFlow(to, "Create a new 5-digit PIN for your account.\n\nDo not share this PIN with anyone.", "Enter PIN");
             return;
         }
 
@@ -282,6 +291,7 @@ public class RegistrationFlowService {
 
         int attemptsLeft = MAX_OTP_ATTEMPTS - session.getOtpAttempts();
         messageService.sendTextMessage(to, "Incorrect OTP. You have " + attemptsLeft + " attempt(s) remaining.");
+        screenService.sendCodeEntryFlow(to, "Please enter the OTP:", "Enter OTP");
     }
 
     // ==================== NEW PIN SETUP ====================
@@ -289,29 +299,30 @@ public class RegistrationFlowService {
     public void handleEnterNewPin(String to, String text, UserSession session) {
         if (!FieldValidators.isValidFiveDigitCode(text)) {
             messageService.sendTextMessage(to, "Invalid PIN. Please enter exactly 5 digits.");
+            screenService.sendCodeEntryFlow(to, "Create a new 5-digit PIN for your account.\n\nDo not share this PIN with anyone.", "Enter PIN");
             return;
         }
         if (text.equals(session.getOtp())) {
             messageService.sendTextMessage(to, "Your new PIN cannot be the same as the OTP. Please choose a different 5-digit PIN.");
+            screenService.sendCodeEntryFlow(to, "Create a new 5-digit PIN for your account.\n\nDo not share this PIN with anyone.", "Enter PIN");
             return;
         }
 
         session.setNewPin(text);
         session.setStep("confirm_new_pin");
-        messageService.sendTextMessage(to, "Please re-enter your new 5-digit PIN to confirm.");
+        screenService.sendCodeEntryFlow(to, "Please re-enter your new 5-digit PIN to confirm.", "Confirm PIN");
     }
 
     public void handleConfirmNewPin(String to, String text, UserSession session) {
         if (!text.equals(session.getNewPin())) {
             session.setStep("enter_new_pin");
-            messageService.sendTextMessage(to, "The PINs do not match. Please enter your new 5-digit PIN again:");
+            screenService.sendCodeEntryFlow(to, "The PINs do not match. Please enter your new 5-digit PIN again:", "Enter PIN");
             return;
         }
 
         completeRegistration(to, session);
     }
-
-    private void completeRegistration(String to, UserSession session) {
+        private void completeRegistration(String to, UserSession session) {
         RegisteredUser user = new RegisteredUser();
         user.setFirstName(session.getFirstName());
         user.setMiddleName(session.getMiddleName());
@@ -321,7 +332,7 @@ public class RegistrationFlowService {
         user.setNationalId(session.getNationalId());
         user.setMobileNumber(session.getMobileNumber());
         user.setHashedPin(passwordEncoder.encode(session.getNewPin()));
-                user.setStatus("active");
+        user.setStatus("active");
         userStore.save(to, user);
 
         log.info("user_registered to={} firstName={} lastName={}", to, session.getFirstName(), session.getLastName());
@@ -364,4 +375,4 @@ public class RegistrationFlowService {
         );
     }
 }
-        
+    
