@@ -148,9 +148,6 @@ public class LoanApprovalFlowService {
             screenService.sendCodeEntryFlow(to, "Enter Approval Code:", "Enter Code");
         }
     }
-    
-    messageService.sendTextMessage(to, "Incorrect " + what + ". You have " + attemptsLeft + " attempt(s) remaining.");
-    }
 
     // ==================== CANCEL LOAN ====================
 
