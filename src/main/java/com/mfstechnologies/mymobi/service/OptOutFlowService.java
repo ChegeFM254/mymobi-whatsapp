@@ -70,9 +70,9 @@ public class OptOutFlowService {
     public void handleOptOutConfirmation(String to, String text, UserSession session) {
         String response = text == null ? "" : text.trim().toLowerCase();
 
-        if (response.equals("yes") || response.equals("y")) {
+            if (response.equals("yes") || response.equals("y")) {
             session.setStep("opt_out_pin");
-            messageService.sendTextMessage(to, "To confirm opt out, please enter your 5-digit PIN:");
+            screenService.sendCodeEntryFlow(to, "To confirm opt out, please enter your 5-digit PIN:", "Enter PIN");
             return;
         }
 
