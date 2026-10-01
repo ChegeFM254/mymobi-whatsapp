@@ -8,6 +8,7 @@ whatsapp:
   app-secret: ${WHATSAPP_APP_SECRET:}
   graph-api-version: ${WHATSAPP_GRAPH_API_VERSION:v21.0}
   public-base-url: ${PUBLIC_BASE_URL:}
+  flow-id: ${WHATSAPP_FLOW_ID:}
 
 app:
   allow-login-without-stored-data: ${ALLOW_LOGIN_WITHOUT_STORED_DATA:true}
