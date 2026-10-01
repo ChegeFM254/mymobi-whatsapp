@@ -116,16 +116,7 @@ class LoanApprovalFlowServiceTest {
         assertThat(session.getStep()).isNotEqualTo("approval_payroll_number");
         // WORKSTREAM E: the Flow must be re-sent so the retry also
         // happens securely, not by falling back to typing in chat.
-        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
-    }
-        Loan loan = pendingLoan();
-        loanStore.save(FROM, loan);
-        UserSession session = new UserSession();
-
-        approvalFlow.handleEnterApprovalCode(FROM, "000000", session);
-
-        assertThat(loan.getApprovalCodeAttempts()).isEqualTo(1);
-        assertThat(session.getStep()).isNotEqualTo("approval_payroll_number");
+                verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
