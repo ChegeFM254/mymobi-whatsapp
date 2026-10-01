@@ -129,7 +129,7 @@ class AuthenticationFlowServiceTest {
     }
 
     @Test
-    void validUpnAdvancesToPinStep() {
+        void validUpnAdvancesToPinStep() {
         UserSession session = new UserSession();
         session.setStep("login_enter_upn");
 
@@ -137,8 +137,10 @@ class AuthenticationFlowServiceTest {
 
         assertThat(session.getStep()).isEqualTo("login_enter_pin");
         assertThat(session.getLoginUpn()).isEqualTo("12345");
-        verify(messageService).sendTextMessage(FROM, "Enter PIN:");
-            }
+        // WORKSTREAM E: PIN entry now goes through the WhatsApp Flow
+        // webview, not a plain text prompt.
+        verify(screenService).sendCodeEntryFlow(FROM, "Enter PIN:", "Enter PIN");
+    }
 
     @Test
     void correctPinAuthenticatesImmediately() {
@@ -172,6 +174,9 @@ class AuthenticationFlowServiceTest {
         assertThat(session.getLoginAttempts()).isEqualTo(1);
         assertThat(session.getStep()).isEqualTo("login_enter_pin");
         verify(messageService).sendTextMessage(eq(FROM), contains("2 attempt(s) remaining"));
+        // WORKSTREAM E: the Flow must be re-sent so the retry also
+        // happens securely, not by falling back to typing in chat.
+        verify(screenService).sendCodeEntryFlow(FROM, "Enter PIN:", "Enter PIN");
     }
 
     @Test
