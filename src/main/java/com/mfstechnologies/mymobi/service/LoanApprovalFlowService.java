@@ -56,7 +56,7 @@ public class LoanApprovalFlowService {
 
     public void handleEnterApprovalCodeMenu(String to, UserSession session) {
         session.setStep("enter_approval_code");
-        messageService.sendTextMessage(to, "Enter Approval Code:");
+        screenService.sendCodeEntryFlow(to, "Enter Approval Code:", "Enter Code");
     }
 
     public void handleEnterApprovalCode(String to, String text, UserSession session) {
@@ -139,6 +139,17 @@ public class LoanApprovalFlowService {
         int attemptsLeft = MAX_APPROVAL_ATTEMPTS - attempts;
         String what = isCodeAttempt ? "Approval Code" : "Payroll Number";
         messageService.sendTextMessage(to, "Incorrect " + what + ". You have " + attemptsLeft + " attempt(s) remaining.");
+
+        // WORKSTREAM E: only the Approval Code is Flow-based - re-send it
+        // so the retry also happens securely. Payroll Number was never a
+        // Flow to begin with, so it keeps its existing plain-text retry
+        // behavior (no re-prompt needed - the person just retypes it).
+        if (isCodeAttempt) {
+            screenService.sendCodeEntryFlow(to, "Enter Approval Code:", "Enter Code");
+        }
+    }
+    
+    messageService.sendTextMessage(to, "Incorrect " + what + ". You have " + attemptsLeft + " attempt(s) remaining.");
     }
 
     // ==================== CANCEL LOAN ====================
