@@ -29,6 +29,12 @@ import static org.mockito.Mockito.*;
  * - userStore here is wired to a fake, in-memory-backed repository (see
  * FakeRepositories) so it keeps behaving like a real, working
  * collaborator, exactly as it did with the old ConcurrentHashMap.
+ *
+ * WORKSTREAM E (WhatsApp Flows webview for PIN/OTP/Approval Code): OTP
+ * entry and new-PIN entry/confirmation now go through
+ * screenService.sendCodeEntryFlow() instead of a plain text prompt -
+ * including every retry path, which must re-send the Flow so the person
+ * never has to fall back to typing the value directly into the chat.
  */
 @ExtendWith(MockitoExtension.class)
 class RegistrationFlowServiceTest {
@@ -57,7 +63,7 @@ class RegistrationFlowServiceTest {
 
     @Test
     void registerMenuStartsOptInForANewNumber() {
-        UserSession session = new UserSession();
+                UserSession session = new UserSession();
 
         registrationFlowService.handleRegisterMenu(FROM, session);
 
@@ -78,7 +84,7 @@ class RegistrationFlowServiceTest {
         verify(messageService).sendTextMessage(eq(FROM), contains("already have an account"));
         verify(screenService, never()).sendOptIn(anyString());
     }
-    
+
     @Test
     void acceptingTermsMovesToFirstNameCollection() {
         UserSession session = new UserSession();
@@ -122,7 +128,7 @@ class RegistrationFlowServiceTest {
         registrationFlowService.handleMiddleName(FROM, "Wanjiru", session);
 
         assertThat(session.getMiddleName()).isEqualTo("Wanjiru");
-        assertThat(session.getStep()).isEqualTo("last_name");
+                assertThat(session.getStep()).isEqualTo("last_name");
     }
 
     @Test
@@ -147,7 +153,8 @@ class RegistrationFlowServiceTest {
     @Test
     void validEmailAddressAdvancesToUpn() {
         UserSession session = new UserSession();
-                registrationFlowService.handleEmailAddress(FROM, "jane.doe@example.com", session);
+
+        registrationFlowService.handleEmailAddress(FROM, "jane.doe@example.com", session);
 
         assertThat(session.getEmailAddress()).isEqualTo("jane.doe@example.com");
         assertThat(session.getStep()).isEqualTo("upn");
@@ -186,13 +193,13 @@ class RegistrationFlowServiceTest {
     @Test
     void invalidNationalIdIsRejected() {
         UserSession session = new UserSession();
-
+        
         registrationFlowService.handleNationalId(FROM, "01234567", session); // starts with 0
 
         assertThat(session.getNationalId()).isNull();
     }
 
-        @Test
+    @Test
     void validNationalIdAutoPopulatesMobileNumberFromWhatsAppAndGoesStraightToConfirmation() {
         UserSession session = new UserSession();
 
@@ -215,6 +222,8 @@ class RegistrationFlowServiceTest {
 
         assertThat(session.getStep()).isEqualTo("enter_otp");
         assertThat(session.getOtp()).matches("^\\d{5}$");
+        // WORKSTREAM E: OTP entry now goes through the Flow webview.
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
@@ -249,7 +258,8 @@ class RegistrationFlowServiceTest {
         assertThat(session.getFirstName()).isEqualTo("NewName");
         verify(screenService).sendConfirmation(FROM, session);
     }
-
+    
+    
     @Test
     void editFieldTextUpdatesMiddleNameCorrectly() {
         UserSession session = new UserSession();
@@ -271,7 +281,7 @@ class RegistrationFlowServiceTest {
     }
 
     @Test
-        void editFieldTextStillValidatesEmailFormat() {
+    void editFieldTextStillValidatesEmailFormat() {
         UserSession session = new UserSession();
         session.setStep("edit_emailaddress");
 
@@ -302,6 +312,7 @@ class RegistrationFlowServiceTest {
         registrationFlowService.handleEnterOtp(FROM, "12345", session);
 
         assertThat(session.getStep()).isEqualTo("enter_new_pin");
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
@@ -313,6 +324,9 @@ class RegistrationFlowServiceTest {
 
         assertThat(session.getOtpAttempts()).isEqualTo(1);
         assertThat(session.getStep()).isNotEqualTo("enter_new_pin");
+                // WORKSTREAM E: the Flow must be re-sent so the retry also
+        // happens securely, not by falling back to typing in chat.
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
@@ -337,17 +351,21 @@ class RegistrationFlowServiceTest {
         registrationFlowService.handleEnterNewPin(FROM, "12345", session);
 
         assertThat(session.getNewPin()).isNull();
+        // WORKSTREAM E: the Flow must be re-sent so the retry also
+        // happens securely, not by falling back to typing in chat.
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
     void validNewPinAdvancesToConfirmStep() {
-                UserSession session = new UserSession();
+        UserSession session = new UserSession();
         session.setOtp("11111");
 
         registrationFlowService.handleEnterNewPin(FROM, "99999", session);
 
         assertThat(session.getNewPin()).isEqualTo("99999");
         assertThat(session.getStep()).isEqualTo("confirm_new_pin");
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
@@ -358,6 +376,9 @@ class RegistrationFlowServiceTest {
         registrationFlowService.handleConfirmNewPin(FROM, "11111", session);
 
         assertThat(session.getStep()).isEqualTo("enter_new_pin");
+        // WORKSTREAM E: the Flow must be re-sent so the retry also
+        // happens securely, not by falling back to typing in chat.
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
@@ -368,7 +389,7 @@ class RegistrationFlowServiceTest {
         session.setLastName("Doe");
         session.setEmailAddress("jane.doe@example.com");
         session.setUpn("12345");
-        session.setNationalId("87654321");
+                session.setNationalId("87654321");
         session.setMobileNumber("0722730336");
         session.setNewPin("99999");
 
