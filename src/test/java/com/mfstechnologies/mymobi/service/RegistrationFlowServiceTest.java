@@ -35,6 +35,10 @@ import static org.mockito.Mockito.*;
  * screenService.sendCodeEntryFlow() instead of a plain text prompt -
  * including every retry path, which must re-send the Flow so the person
  * never has to fall back to typing the value directly into the chat.
+ *
+ * WORKSTREAM F (mock service abstraction layer): OTP delivery now goes
+ * through smsService.sendSms(...) (mocked here) instead of an inline
+ * CompletableFuture-based simulation.
  */
 @ExtendWith(MockitoExtension.class)
 class RegistrationFlowServiceTest {
@@ -46,6 +50,8 @@ class RegistrationFlowServiceTest {
     @Mock
     private WhatsAppMessageService messageService;
     @Mock
+    private SmsService smsService;
+    @Mock
     private RegisteredUserRepository registeredUserRepository;
 
     private RegisteredUserStore userStore;
@@ -56,14 +62,14 @@ class RegistrationFlowServiceTest {
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
         userStore = new RegisteredUserStore(registeredUserRepository);
         PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-        registrationFlowService = new RegistrationFlowService(screenService, messageService, userStore, passwordEncoder);
-    }
+        registrationFlowService = new RegistrationFlowService(screenService, messageService, smsService, userStore, passwordEncoder);
+            }
 
     // ==================== ENTRY + OPT-IN ====================
 
     @Test
     void registerMenuStartsOptInForANewNumber() {
-                UserSession session = new UserSession();
+        UserSession session = new UserSession();
 
         registrationFlowService.handleRegisterMenu(FROM, session);
 
@@ -122,13 +128,13 @@ class RegistrationFlowServiceTest {
     }
 
     @Test
-    void validMiddleNameAdvancesToLastName() {
+        void validMiddleNameAdvancesToLastName() {
         UserSession session = new UserSession();
 
         registrationFlowService.handleMiddleName(FROM, "Wanjiru", session);
 
         assertThat(session.getMiddleName()).isEqualTo("Wanjiru");
-                assertThat(session.getStep()).isEqualTo("last_name");
+        assertThat(session.getStep()).isEqualTo("last_name");
     }
 
     @Test
@@ -187,13 +193,13 @@ class RegistrationFlowServiceTest {
         registrationFlowService.handleUpnField(FROM, "12345", session);
 
         assertThat(session.getUpn()).isEqualTo("12345");
-        assertThat(session.getStep()).isEqualTo("national_id");
+                assertThat(session.getStep()).isEqualTo("national_id");
     }
 
     @Test
     void invalidNationalIdIsRejected() {
         UserSession session = new UserSession();
-        
+
         registrationFlowService.handleNationalId(FROM, "01234567", session); // starts with 0
 
         assertThat(session.getNationalId()).isNull();
@@ -215,13 +221,15 @@ class RegistrationFlowServiceTest {
     // ==================== CONFIRM / EDIT ====================
 
     @Test
-    void confirmDetailsGeneratesOtpAndMovesToOtpStep() {
+    void confirmDetailsSendsOtpViaSmsAndMovesToOtpStep() {
         UserSession session = new UserSession();
 
         registrationFlowService.handleConfirmDetails(FROM, session);
 
         assertThat(session.getStep()).isEqualTo("enter_otp");
         assertThat(session.getOtp()).matches("^\\d{5}$");
+        // WORKSTREAM F: OTP delivery now goes through SmsService.
+        verify(smsService).sendSms(eq(FROM), contains(session.getOtp()));
         // WORKSTREAM E: OTP entry now goes through the Flow webview.
         verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
@@ -250,7 +258,7 @@ class RegistrationFlowServiceTest {
     @Test
     void editFieldTextUpdatesTheCorrectFieldAndReturnsToConfirmation() {
         UserSession session = new UserSession();
-        session.setStep("edit_firstname");
+                session.setStep("edit_firstname");
         session.setFirstName("OldName");
 
         registrationFlowService.handleEditFieldText(FROM, "NewName", session);
@@ -258,8 +266,7 @@ class RegistrationFlowServiceTest {
         assertThat(session.getFirstName()).isEqualTo("NewName");
         verify(screenService).sendConfirmation(FROM, session);
     }
-    
-    
+
     @Test
     void editFieldTextUpdatesMiddleNameCorrectly() {
         UserSession session = new UserSession();
@@ -316,7 +323,7 @@ class RegistrationFlowServiceTest {
     }
 
     @Test
-    void wrongOtpIncrementsAttempts() {
+        void wrongOtpIncrementsAttempts() {
         UserSession session = new UserSession();
         session.setOtp("12345");
 
@@ -324,7 +331,7 @@ class RegistrationFlowServiceTest {
 
         assertThat(session.getOtpAttempts()).isEqualTo(1);
         assertThat(session.getStep()).isNotEqualTo("enter_new_pin");
-                // WORKSTREAM E: the Flow must be re-sent so the retry also
+        // WORKSTREAM E: the Flow must be re-sent so the retry also
         // happens securely, not by falling back to typing in chat.
         verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
@@ -380,8 +387,7 @@ class RegistrationFlowServiceTest {
         // happens securely, not by falling back to typing in chat.
         verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
-
-    @Test
+        @Test
     void matchingPinConfirmationCompletesRegistration() {
         UserSession session = new UserSession();
         session.setFirstName("Jane");
@@ -389,7 +395,7 @@ class RegistrationFlowServiceTest {
         session.setLastName("Doe");
         session.setEmailAddress("jane.doe@example.com");
         session.setUpn("12345");
-                session.setNationalId("87654321");
+        session.setNationalId("87654321");
         session.setMobileNumber("0722730336");
         session.setNewPin("99999");
 
