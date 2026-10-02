@@ -60,7 +60,7 @@ public class LoanPaymentFlowService {
             return;
         }
 
-        int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() : 14442;
+        int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().installmentPerMonth() : 14442;
         screenService.sendPayLoanOptions(to, remaining, monthlyInstallment);
     }
 
@@ -77,13 +77,13 @@ public class LoanPaymentFlowService {
 
         if (selected == null || selected < 1 || selected > remaining) {
             log.warn("Invalid installment selection {} for {} (remaining={})", installmentsButtonId, to, remaining);
-            int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() : 14442;
+            int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().installmentPerMonth() : 14442;
             screenService.sendPayLoanOptions(to, remaining, monthlyInstallment);
             return;
         }
 
         session.setPendingPaymentInstallments(selected);
-        int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() : 14442;
+        int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().installmentPerMonth() : 14442;
         int total = monthlyInstallment * selected;
         int remainingAfter = remaining - selected;
         int remainingBalanceAfter = monthlyInstallment * remainingAfter;
@@ -106,7 +106,7 @@ public class LoanPaymentFlowService {
         loan.setPaymentInProgress(true);
 
         int installments = session.getPendingPaymentInstallments();
-        int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() : 14442;
+        int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().installmentPerMonth() : 14442;
         int payAmount = monthlyInstallment * installments;
 
         mpesaService.initiateStkPush(to, payAmount, "loan_payment");
