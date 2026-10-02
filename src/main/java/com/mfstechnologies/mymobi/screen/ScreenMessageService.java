@@ -20,7 +20,7 @@ import java.util.Map;
  * use the interactive "list" type instead. Keep this in mind for every
  * screen added here.
  *
-  * WORKSTREAM B (reactive -> synchronous): every method here used to
+ * WORKSTREAM B (reactive -> synchronous): every method here used to
  * return Mono<Void>, simply forwarding whatever WhatsAppMessageService
  * returned. Now that WhatsAppMessageService's send methods are plain
  * blocking void calls, these are too - no Mono wrapping needed anywhere
@@ -63,7 +63,7 @@ public class ScreenMessageService {
      * the ordinary text() field by IncomingMessage.parse() and routed by
      * session.getStep(), exactly like typed input. flow_token here only
      * satisfies Meta's requirement that each send include one; a random
-     * value is sufficient since nothing reads it back.
+      * value is sufficient since nothing reads it back.
      *
      * Requires whatsapp.flow-id (env var WHATSAPP_FLOW_ID) to be set
      * once the Flow has been created and published in Meta Business
@@ -119,8 +119,7 @@ public class ScreenMessageService {
      * The Welcome/Home screen - direct equivalent of sendWelcome() in the
      * Node.js version, including the Log Out option added there later.
      */
-
-        public void sendWelcome(String to) {
+    public void sendWelcome(String to) {
         String greeting = userStore.findByPhoneNumber(to)
                 .map(user -> "Hello " + user.getFirstName() + ", Welcome to MyMobi [Java]")
                 .orElse("Welcome to MyMobi [Java]");
@@ -128,7 +127,7 @@ public class ScreenMessageService {
         // No footer at all on this screen, for either the personalized
         // or generic case: "MyMobi Emergency Loan" was misleading, since
         // MyMobi also offers Buy Airtime - "Select a service" alone is a
-        // complete, honest description of what's on offer.
+         // complete, honest description of what's on offer.
         Map<String, Object> payload = Map.of(
                 "messaging_product", "whatsapp",
                 "to", to,
@@ -193,9 +192,9 @@ public class ScreenMessageService {
      * user's actual next loan action (Apply/Approve/Pay) is visible
      * immediately, without an extra tap. Cancel Loan shows directly
      * alongside Approve Loan here too, not just one screen deeper.
-     */
+      */
 
-        public void sendMainMenu(String to) {
+    public void sendMainMenu(String to) {
         com.mfstechnologies.mymobi.model.Loan loan = loanStore.findByPhoneNumber(to).orElse(null);
         java.util.List<Map<String, Object>> loanActionRows;
 
@@ -258,7 +257,7 @@ public class ScreenMessageService {
                                         Map.of("type", "reply", "reply", Map.of("id", "optin_yes", "title", "Yes")),
                                         Map.of("type", "reply", "reply", Map.of("id", "optin_no", "title", "No"))
                                 )
-                        )
+                                                 )
                 )
         );
         messageService.sendMessage(to, payload);
@@ -323,7 +322,7 @@ public class ScreenMessageService {
                         "type", "button",
                         "body", Map.of("text", details),
                         "action", Map.of(
-                                "buttons", List.of(
+                                                         "buttons", List.of(
                                         Map.of("type", "reply", "reply", Map.of("id", "confirm_details", "title", "Accept")),
                                         Map.of("type", "reply", "reply", Map.of("id", "edit_details", "title", "Edit"))
                                 )
@@ -388,7 +387,7 @@ public class ScreenMessageService {
                                 "sections", List.of(Map.of(
                                         "title", "Repayment Period",
                                         "rows", List.of(
-                                                Map.of("id", "tenure_1", "title", "1 Month", "description", "Loan limit KES 20,000"),
+                                                                                         Map.of("id", "tenure_1", "title", "1 Month", "description", "Loan limit KES 20,000"),
                                                 Map.of("id", "tenure_2", "title", "2 Months", "description", "Loan limit KES 40,000"),
                                                 Map.of("id", "tenure_3", "title", "3 Months", "description", "Loan limit KES 60,000"),
                                                 Map.of("id", "back", "title", "Back", "description", "Go back"),
@@ -438,7 +437,7 @@ public class ScreenMessageService {
      * Apply Loan: fee breakdown and Accept/Decline. Direct equivalent of
      * sendLoanBreakdown() in the Node.js version.
      */
-      public void sendLoanBreakdown(String to, com.mfstechnologies.mymobi.model.LoanBreakdown breakdown, int tenureMonths) {
+    public void sendLoanBreakdown(String to, com.mfstechnologies.mymobi.model.LoanBreakdown breakdown, int tenureMonths) {
         String periodLabel = tenureMonths > 1 ? "Months" : "Month";
         String details = String.format(
                 "Loan Amount: KES %,d\nTotal Deductions: KES %,d\nLoan Disbursement: KES %,d\nLoan Period: %d %s\nInstallment Per Month: KES %,d\nPlatform Fee: KES %,d\nTotal Repayment: KES %,d\n\nConfirm and Proceed:",
@@ -453,7 +452,7 @@ public class ScreenMessageService {
         );
 
         Map<String, Object> payload = Map.of(
-                "messaging_product", "whatsapp",
+                         "messaging_product", "whatsapp",
                 "to", to,
                 "type", "interactive",
                 "interactive", Map.of(
@@ -489,14 +488,15 @@ public class ScreenMessageService {
         String periodLabel = loan.getTenureMonths() > 1 ? "Months" : "Month";
         com.mfstechnologies.mymobi.model.LoanBreakdown breakdown = loan.getBreakdown();
         String details = String.format(
-               "Loan Amount: KES %,d\nUpfront Fees: KES %,d\nYou Receive: KES %,d\nLoan Period: %d %s\nMonthly Installment: KES %,d\nPlatform Fee: KES %,d\nDue Date: %s\nStatus: %s\n\nEnter your Approval Code to proceed.",
+               "Loan Amount: KES %,d\nTotal Deductions: KES %,d\nLoan Disbursement: KES %,d\nLoan Period: %d %s\nInstallment Per Month: KES %,d\nPlatform Fee: KES %,d\nTotal Repayment: KES %,d\nDue Date: %s\nStatus: %s\n\nEnter your Approval Code to proceed.",
                 loan.getLoanAmount(),
-                breakdown.upfrontFee(),
+                breakdown.totalDeductions(),
                 breakdown.disbursement(),
                 loan.getTenureMonths(),
                 periodLabel,
-                breakdown.monthlyInstallment(),
+                breakdown.installmentPerMonth(),
                 breakdown.platformFee(),
+                breakdown.totalRepayment(),
                 loan.getDueDate(),
                 humanizeStatus(loan.getStatus())
         );
@@ -517,7 +517,7 @@ public class ScreenMessageService {
                                         "rows", List.of(
                                                 Map.of("id", "enter_approval_code_menu", "title", "Enter Approval Code", "description", "Type the code you received"),
                                                 Map.of("id", "cancel_loan", "title", "Cancel Loan", "description", "Cancel this loan application"),
-                                                Map.of("id", "back", "title", "Back", "description", "Go back"),
+                                                                                         Map.of("id", "back", "title", "Back", "description", "Go back"),
                                                 Map.of("id", "home", "title", "Home", "description", "Return to home"),
                                                 Map.of("id", "logout", "title", "Log Out", "description", "Log out of the app")
                                         )
@@ -582,7 +582,7 @@ public class ScreenMessageService {
                         "footer", Map.of("text", "MyMobi Emergency Loan"),
                         "action", Map.of(
                                 "button", "Select Option",
-                                "sections", List.of(Map.of("title", "Options", "rows", rows))
+                                                         "sections", List.of(Map.of("title", "Options", "rows", rows))
                         )
                 )
         );
@@ -647,7 +647,7 @@ public class ScreenMessageService {
 
     /**
      * Loan Statement: cost confirmation before generating the document.
-     */
+      */
     public void sendLoanStatementConfirm(String to, double cost) {
         String body = String.format("Loan Statement: You will be charged KES %.2f for this request.\n\nProceed:", cost);
 
