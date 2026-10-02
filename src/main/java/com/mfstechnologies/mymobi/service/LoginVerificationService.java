@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 import java.util.Optional;
 
 /**
- * Verifies UPN + PIN for Log In — direct equivalent of
+ * Verifies UPN + PIN for Log In - direct equivalent of
  * verifyLoginCredentials() from the Node.js version, including the
  * testing-mode bypass toggle.
  *
@@ -25,11 +25,18 @@ import java.util.Optional;
  *    synthetic account is created on the fly.
  *
  * FOR UAT/PRODUCTION: set ALLOW_LOGIN_WITHOUT_STORED_DATA=false in
- * Render's environment — no code change needed, exactly like the Node
+ * Render's environment - no code change needed, exactly like the Node
  * version's equivalent flag.
+ *
+ * WORKSTREAM F (mock service abstraction layer): now implements
+ * CustomerVerificationService, giving AuthenticationFlowService (and
+ * anywhere else that needs login verification) a clean interface to
+ * depend on. Keeps its own name rather than a "Mock" prefix, since the
+ * production mode above is genuinely production-ready, not a
+ * placeholder standing in for a real implementation.
  */
 @Service
-public class LoginVerificationService {
+public class LoginVerificationService implements CustomerVerificationService {
 
     private static final Logger log = LoggerFactory.getLogger(LoginVerificationService.class);
 
@@ -47,12 +54,7 @@ public class LoginVerificationService {
         this.allowLoginWithoutStoredData = allowLoginWithoutStoredData;
     }
 
-    public record LoginResult(boolean success, RegisteredUser user) {
-        static LoginResult failure() {
-            return new LoginResult(false, null);
-        }
-    }
-
+    @Override
     public LoginResult verify(String phoneNumber, String upn, String pin) {
         Optional<RegisteredUser> existing = userStore.findByPhoneNumber(phoneNumber);
 
@@ -77,7 +79,7 @@ public class LoginVerificationService {
         synthetic.setFirstName("Test");
         synthetic.setLastName("User");
         synthetic.setUpn(upn);
-        synthetic.setNationalId("00000000"); // placeholder — not real KYC data
+        synthetic.setNationalId("00000000"); // placeholder - not real KYC data
         synthetic.setMobileNumber(phoneNumber);
         synthetic.setHashedPin(passwordEncoder.encode(pin));
         synthetic.setStatus("active");
