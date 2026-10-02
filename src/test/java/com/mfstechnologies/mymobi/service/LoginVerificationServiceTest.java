@@ -37,7 +37,7 @@ class LoginVerificationServiceTest {
         RegisteredUserStore userStore = freshUserStore();
         LoginVerificationService service = new LoginVerificationService(userStore, passwordEncoder, true);
 
-        LoginVerificationService.LoginResult result = service.verify("254700000010", "12345", "54321");
+        CustomerVerificationService.LoginResult result = service.verify("254700000010", "12345", "54321");
 
         assertThat(result.success()).isTrue();
         assertThat(result.user().getUpn()).isEqualTo("12345");
@@ -50,7 +50,7 @@ class LoginVerificationServiceTest {
         RegisteredUserStore userStore = freshUserStore();
         LoginVerificationService service = new LoginVerificationService(userStore, passwordEncoder, false);
 
-        LoginVerificationService.LoginResult result = service.verify("254700000011", "12345", "54321");
+        CustomerVerificationService.LoginResult result = service.verify("254700000011", "12345", "54321");
 
         assertThat(result.success()).isFalse();
         assertThat(userStore.findByPhoneNumber("254700000011")).isEmpty();
@@ -67,7 +67,7 @@ class LoginVerificationServiceTest {
         userStore.save("254700000012", realUser);
 
         LoginVerificationService service = new LoginVerificationService(userStore, passwordEncoder, true);
-        LoginVerificationService.LoginResult result = service.verify("254700000012", "19999999", "11111");
+        CustomerVerificationService.LoginResult result = service.verify("254700000012", "19999999", "11111");
 
         assertThat(result.success()).isTrue();
         assertThat(result.user().getFirstName()).isEqualTo("Real");
@@ -83,7 +83,7 @@ class LoginVerificationServiceTest {
         userStore.save("254700000013", realUser);
 
         LoginVerificationService service = new LoginVerificationService(userStore, passwordEncoder, true);
-        LoginVerificationService.LoginResult result = service.verify("254700000013", "19999999", "99999");
+        CustomerVerificationService.LoginResult result = service.verify("254700000013", "19999999", "99999");
 
         assertThat(result.success()).isFalse();
     }
@@ -97,7 +97,7 @@ class LoginVerificationServiceTest {
         userStore.save("254700000014", realUser);
 
         LoginVerificationService service = new LoginVerificationService(userStore, passwordEncoder, true);
-        LoginVerificationService.LoginResult result = service.verify("254700000014", "10000000", "11111");
+        CustomerVerificationService.LoginResult result = service.verify("254700000014", "10000000", "11111");
 
         assertThat(result.success()).isFalse();
     }
@@ -114,7 +114,7 @@ class LoginVerificationServiceTest {
         userStore.save("254700000015", realUser);
 
         LoginVerificationService service = new LoginVerificationService(userStore, passwordEncoder, true);
-        LoginVerificationService.LoginResult result = service.verify("254700000015", "19999999", "00000");
+        CustomerVerificationService.LoginResult result = service.verify("254700000015", "19999999", "00000");
 
         assertThat(result.success()).isFalse();
         assertThat(result.user()).isNull();
