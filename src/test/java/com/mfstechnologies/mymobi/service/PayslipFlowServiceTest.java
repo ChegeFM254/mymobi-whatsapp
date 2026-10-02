@@ -31,6 +31,13 @@ import static org.mockito.Mockito.*;
  * repositories (see FakeRepositories) so they keep behaving like real,
  * working collaborators, exactly as they did with the old
  * ConcurrentHashMap.
+ *
+ * WORKSTREAM F (mock service abstraction layer): the inline M-Pesa STK
+ * push simulation is now delegated to MpesaService (mocked here) -
+ * confirmingTriggersTheStkPushForTheCorrectAmount verifies the call
+ * directly, rather than checking a specific message string, since the
+ * exact wording is now MockMpesaService's responsibility, not this
+ * flow's.
  */
 @ExtendWith(MockitoExtension.class)
 class PayslipFlowServiceTest {
@@ -41,6 +48,8 @@ class PayslipFlowServiceTest {
     private ScreenMessageService screenService;
     @Mock
     private WhatsAppMessageService messageService;
+    @Mock
+    private MpesaService mpesaService;
     @Mock
     private RegisteredUserRepository registeredUserRepository;
     @Mock
@@ -62,10 +71,9 @@ class PayslipFlowServiceTest {
                 "test_token", "test_phone_id", "test_verify_token", "test_secret",
                 "v21.0", "https://mymobi-test.onrender.com"
         );
-        payslipFlow = new PayslipFlowService(screenService, messageService, userStore, documentStore, documentHtmlService, properties);
+        payslipFlow = new PayslipFlowService(screenService, messageService, mpesaService, userStore, documentStore, documentHtmlService, properties);
     }
-
-    @Test
+        @Test
     void payslipMenuPromptsForMonths() {
         UserSession session = new UserSession();
 
@@ -96,7 +104,7 @@ class PayslipFlowServiceTest {
     }
 
     @Test
-    void confirmingSendsStkPushPromptBeforeGeneratingTheDocument() {
+    void confirmingTriggersTheStkPushForTheCorrectAmount() {
         RegisteredUser user = new RegisteredUser();
         user.setFirstName("Jane");
         user.setLastName("Doe");
@@ -108,8 +116,7 @@ class PayslipFlowServiceTest {
 
         payslipFlow.handleConfirmPayslip(FROM, session);
 
-        verify(messageService).sendTextMessage(eq(FROM),
-                eq("You are about to pay KES 69.60 to MyMobi account XXXXX. Please enter your Mpesa PIN."));
+        verify(mpesaService).initiateStkPush(FROM, 69.60, "payslip");
     }
 
     @Test
