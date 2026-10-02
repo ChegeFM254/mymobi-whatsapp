@@ -63,8 +63,8 @@ class LoanApplicationFlowServiceTest {
         FakeRepositories.wireAsInMemoryStore(loanRepository, Loan::getPhoneNumber);
         loanStore = new LoanStore(loanRepository);
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
-                userStore = new RegisteredUserStore(registeredUserRepository);
-        calculationService = new LoanCalculationService();
+        userStore = new RegisteredUserStore(registeredUserRepository);
+        calculationService = new MockLoanCalculationService();
         loanFlow = new LoanApplicationFlowService(screenService, messageService, smsService, loanStore, userStore, calculationService);
     }
 
