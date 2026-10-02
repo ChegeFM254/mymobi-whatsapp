@@ -62,8 +62,8 @@ class LoanPaymentFlowServiceTest {
         Loan loan = new Loan();
         loan.setTenureMonths(tenureMonths);
         loan.setInstallmentsPaid(installmentsPaid);
-        loan.setBreakdown(new LoanBreakdown(15000, 2943, 32057, 14442, 150));
-                loan.setStatus("approved");
+        loan.setBreakdown(new LoanBreakdown(15000, 2943, 32057, 14442, 14592, 150));
+        loan.setStatus("approved");
         loan.setRefNo("MVCAGHD1");
         return loan;
     }
