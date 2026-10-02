@@ -29,6 +29,13 @@ import static org.mockito.Mockito.*;
  * repositories (see FakeRepositories) so they keep behaving like real,
  * working collaborators, exactly as they did with the old
  * ConcurrentHashMap.
+ *
+ * WORKSTREAM F (mock service abstraction layer): Approval Code delivery
+ * now goes through smsService.sendSms(...) (mocked here) for the SMS
+ * text itself - the staleness-check-then-screen part stays as this
+ * flow's own delayed task and isn't directly observable from a
+ * synchronous unit test (same as before this change), so it isn't
+ * asserted on here.
  */
 @ExtendWith(MockitoExtension.class)
 class LoanApplicationFlowServiceTest {
@@ -39,6 +46,8 @@ class LoanApplicationFlowServiceTest {
     private ScreenMessageService screenService;
     @Mock
     private WhatsAppMessageService messageService;
+    @Mock
+    private SmsService smsService;
     @Mock
     private RegisteredUserRepository registeredUserRepository;
     @Mock
@@ -54,11 +63,11 @@ class LoanApplicationFlowServiceTest {
         FakeRepositories.wireAsInMemoryStore(loanRepository, Loan::getPhoneNumber);
         loanStore = new LoanStore(loanRepository);
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
-        userStore = new RegisteredUserStore(registeredUserRepository);
+                userStore = new RegisteredUserStore(registeredUserRepository);
         calculationService = new LoanCalculationService();
-        loanFlow = new LoanApplicationFlowService(screenService, messageService, loanStore, userStore, calculationService);
+        loanFlow = new LoanApplicationFlowService(screenService, messageService, smsService, loanStore, userStore, calculationService);
     }
-    
+
     // ==================== APPLY LOAN ====================
 
     @Test
@@ -78,7 +87,7 @@ class LoanApplicationFlowServiceTest {
         loanStore.save(FROM, existing);
 
         UserSession session = new UserSession();
-        
+
         loanFlow.handleApplyLoan(FROM, session);
 
         verify(screenService, never()).sendLoanTenureOptions(anyString());
@@ -119,7 +128,7 @@ class LoanApplicationFlowServiceTest {
 
         assertThat(session.getLoanAmount()).isNull();
     }
-
+    
     @Test
     void loanAmountAboveTenureLimitIsRejected() {
         UserSession session = new UserSession();
@@ -143,7 +152,7 @@ class LoanApplicationFlowServiceTest {
         assertThat(session.getStep()).isEqualTo("loan_confirm");
         assertThat(session.getCurrentMenu()).isEqualTo("loan_breakdown_menu");
         verify(screenService).sendLoanBreakdown(eq(FROM), any(), eq(1));
-            }
+    }
 
     // ==================== ACCEPT / DECLINE ====================
 
@@ -184,7 +193,7 @@ class LoanApplicationFlowServiceTest {
 
         assertThat(session.getPayrollNumberAttempts()).isEqualTo(1);
         assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
-    }
+            }
 
     @Test
     void thirdWrongPayrollNumberCancelsTheApplication() {
@@ -208,7 +217,7 @@ class LoanApplicationFlowServiceTest {
         RegisteredUser user = new RegisteredUser();
         user.setUpn("19999999");
         userStore.save(FROM, user);
-        
+
         UserSession session = new UserSession();
         session.setLoanAmount(15000);
         session.setLoanTenureMonths(1);
@@ -222,6 +231,8 @@ class LoanApplicationFlowServiceTest {
         assertThat(submitted.getRefNo()).isNotBlank();
         assertThat(submitted.getApprovalCode()).matches("^\\d{6}$");
         assertThat(session.getLoanAmount()).isNull(); // session fields cleared after submission
+        // WORKSTREAM F: Approval Code delivery now goes through SmsService.
+        verify(smsService).sendSms(eq(FROM), contains(submitted.getApprovalCode()));
     }
 
     // ==================== BACK NAVIGATION ====================
@@ -247,7 +258,7 @@ class LoanApplicationFlowServiceTest {
     }
 
     @Test
-    void backFromBreakdownGoesToLoanAmountMenu() {
+        void backFromBreakdownGoesToLoanAmountMenu() {
         UserSession session = new UserSession();
         session.setCurrentMenu("loan_breakdown_menu");
         session.setLoanLimit(20000);
