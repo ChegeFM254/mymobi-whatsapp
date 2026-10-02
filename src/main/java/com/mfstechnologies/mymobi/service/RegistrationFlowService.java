@@ -12,8 +12,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
  * The full Registration/KYC flow - OptIn, Terms, 6 typed KYC fields plus
@@ -35,9 +33,6 @@ import java.util.concurrent.TimeUnit;
  * WORKSTREAM B (reactive -> synchronous): every method here used to
  * return Mono<Void>, chaining follow-up screens with .then(). All
  * converted to plain blocking void methods with sequential statements.
- * deliverOtpAfterDelay's error handling changed from .doOnError().
- * subscribe() to a plain try/catch, since sendTextMessage() now throws
- * directly instead of carrying errors on a reactive error channel.
  *
  * WORKSTREAM D (login/registration simplification): Mobile Number is no
  * longer typed during registration - handleNationalId now auto-populates
@@ -57,6 +52,11 @@ import java.util.concurrent.TimeUnit;
  * afterward - without that, the person's only way to retry would be
  * falling back to typing the value directly into the chat, defeating the
  * whole point of using the Flow in the first place.
+ *
+ * WORKSTREAM F (mock service abstraction layer): the inline
+ * CompletableFuture-based "deliverOtpAfterDelay" simulation is gone -
+ * OTP delivery is now a single smsService.sendSms(...) call, delegating
+ * the delay/retry/delivery mechanics to SmsService entirely.
  */
 @Service
 public class RegistrationFlowService {
@@ -75,17 +75,20 @@ public class RegistrationFlowService {
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
+    private final SmsService smsService;
     private final RegisteredUserStore userStore;
     private final PasswordEncoder passwordEncoder;
 
     public RegistrationFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
+            SmsService smsService,
             RegisteredUserStore userStore,
             PasswordEncoder passwordEncoder
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
+        this.smsService = smsService;
         this.userStore = userStore;
         this.passwordEncoder = passwordEncoder;
     }
@@ -124,11 +127,10 @@ public class RegistrationFlowService {
     public void handleDeclineTerms(String to, UserSession session) {
         screenService.sendWelcome(to);
     }
-
-    // ==================== KYC FIELD COLLECTION ====================
+        // ==================== KYC FIELD COLLECTION ====================
     // Order: First Name -> Middle Name -> Last Name -> Email Address ->
     // UPN Number -> National ID Number -> Confirmation (Mobile Number is
-        // auto-populated from WhatsApp, not a typed step - see WORKSTREAM D).
+    // auto-populated from WhatsApp, not a typed step - see WORKSTREAM D).
 
     public void handleFirstName(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
@@ -190,10 +192,10 @@ public class RegistrationFlowService {
 
     public void handleNationalId(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-            messageService.sendTextMessage(to, "Please enter your National ID Number.");
+                        messageService.sendTextMessage(to, "Please enter your National ID Number.");
             return;
         }
-                if (!FieldValidators.isValidNationalId(text)) {
+        if (!FieldValidators.isValidNationalId(text)) {
             messageService.sendTextMessage(to, "National ID should be exactly 8 digits and cannot start with 0. Please try again.");
             return;
         }
@@ -213,7 +215,7 @@ public class RegistrationFlowService {
         session.setOtpAttempts(0);
         session.setStep("enter_otp");
 
-        deliverOtpAfterDelay(to, otp);
+        smsService.sendSms(to, "OTP " + otp);
         screenService.sendCodeEntryFlow(to, "An OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:", "Enter OTP");
     }
 
@@ -255,10 +257,10 @@ public class RegistrationFlowService {
         switch (step) {
             case "edit_firstname" -> session.setFirstName(text);
             case "edit_middlename" -> session.setMiddleName(text);
-            case "edit_lastname" -> session.setLastName(text);
+                            case "edit_lastname" -> session.setLastName(text);
             case "edit_emailaddress" -> session.setEmailAddress(text);
             case "edit_upn" -> session.setUpn(text);
-                            case "edit_nationalid" -> session.setNationalId(text);
+            case "edit_nationalid" -> session.setNationalId(text);
             default -> log.warn("Unexpected edit step {} for {}", step, to);
         }
 
@@ -319,10 +321,10 @@ public class RegistrationFlowService {
             screenService.sendCodeEntryFlow(to, "The PINs do not match. Please enter your new 5-digit PIN again:", "Enter PIN");
             return;
         }
-
-        completeRegistration(to, session);
+                completeRegistration(to, session);
     }
-        private void completeRegistration(String to, UserSession session) {
+
+    private void completeRegistration(String to, UserSession session) {
         RegisteredUser user = new RegisteredUser();
         user.setFirstName(session.getFirstName());
         user.setMiddleName(session.getMiddleName());
@@ -356,23 +358,4 @@ public class RegistrationFlowService {
         session.setOtpAttempts(0);
         session.setNewPin(null);
     }
-
-    /**
-     * Simulates SMS delivery of the OTP, arriving as a separate WhatsApp
-     * message a few seconds later. TODO: remove once a real SMS/backend
-     * delivers this for real.
-     */
-    private void deliverOtpAfterDelay(String to, String otp) {
-        CompletableFuture.runAsync(
-                () -> {
-                    try {
-                        messageService.sendTextMessage(to, "OTP " + otp);
-                    } catch (Exception err) {
-                        log.error("Failed to deliver simulated OTP to {}: {}", to, err.getMessage());
-                    }
-                },
-                CompletableFuture.delayedExecutor(5, TimeUnit.SECONDS)
-        );
-    }
 }
-    
