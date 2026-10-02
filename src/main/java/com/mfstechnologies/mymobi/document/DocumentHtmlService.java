@@ -190,10 +190,10 @@ private String documentPageWrapper(String title, String bodyHtml) {
         if (loan.getBreakdown() == null) {
             return 0;
         }
-        return loan.getBreakdown().monthlyInstallment() * loan.getTenureMonths();
+        return loan.getBreakdown().installmentPerMonth() * loan.getTenureMonths();
     }
 
     private int calculateRemainingBalance(Loan loan) {
-        return calculateTotalObligation(loan) - (loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() * loan.getInstallmentsPaid() : 0);
+    return calculateTotalObligation(loan) - (loan.getBreakdown() != null ? loan.getBreakdown().installmentPerMonth() * loan.getInstallmentsPaid() : 0);
     }
 }
