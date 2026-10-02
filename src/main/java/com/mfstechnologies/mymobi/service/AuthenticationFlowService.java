@@ -16,8 +16,14 @@ import java.util.concurrent.TimeUnit;
  * UPN -> PIN -> authenticated, matching the product decision to drop
  * the extra step. handleLoginEnterVerificationCode, the code-generation/
  * delivery logic (CodeGenerator, deliverCodeAfterDelay), and the
- * "login_enter_verification_code" step are all gone rather than kept
+  * "login_enter_verification_code" step are all gone rather than kept
  * dormant, since nothing references them anymore.
+ *
+ * WORKSTREAM F (mock service abstraction layer): now depends on
+ * CustomerVerificationService (an interface) rather than
+ * LoginVerificationService's concrete type directly - Spring still
+ * injects the same LoginVerificationService bean underneath, since it's
+ * currently the only implementation.
  */
 @Service
 public class AuthenticationFlowService {
@@ -28,14 +34,14 @@ public class AuthenticationFlowService {
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
     private final LoginLockoutService lockoutService;
-    private final LoginVerificationService loginVerificationService;
+    private final CustomerVerificationService loginVerificationService;
     private final InactivityTimeoutService inactivityTimeoutService;
 
     public AuthenticationFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
             LoginLockoutService lockoutService,
-            LoginVerificationService loginVerificationService,
+            CustomerVerificationService loginVerificationService,
             InactivityTimeoutService inactivityTimeoutService
     ) {
         this.screenService = screenService;
@@ -83,7 +89,7 @@ public class AuthenticationFlowService {
             return;
         }
 
-        LoginVerificationService.LoginResult result = loginVerificationService.verify(to, session.getLoginUpn(), text);
+        CustomerVerificationService.LoginResult result = loginVerificationService.verify(to, session.getLoginUpn(), text);
 
         if (!result.success()) {
             recordFailedAttemptAndRespond(to, session, "Incorrect UPN or PIN.");
