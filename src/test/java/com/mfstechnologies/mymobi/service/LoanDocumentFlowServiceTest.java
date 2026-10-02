@@ -34,6 +34,12 @@ import static org.mockito.Mockito.*;
  * in-memory-backed repository (see FakeRepositories) so they keep
  * behaving like real, working collaborators, exactly as they did with
  * the old ConcurrentHashMap.
+ *
+ * WORKSTREAM F (mock service abstraction layer): the inline M-Pesa STK
+ * push simulation is now delegated to MpesaService (mocked here) - both
+ * STK push tests verify the call directly rather than a specific
+ * message string, since the exact wording is now MockMpesaService's
+ * responsibility, not this flow's.
  */
 @ExtendWith(MockitoExtension.class)
 class LoanDocumentFlowServiceTest {
@@ -45,12 +51,14 @@ class LoanDocumentFlowServiceTest {
     @Mock
     private WhatsAppMessageService messageService;
     @Mock
+    private MpesaService mpesaService;
+    @Mock
     private RegisteredUserRepository registeredUserRepository;
     @Mock
     private LoanRepository loanRepository;
     @Mock
     private DocumentRepository documentRepository;
-
+    
     private RegisteredUserStore userStore;
     private LoanStore loanStore;
     private DocumentStore documentStore;
@@ -70,7 +78,7 @@ class LoanDocumentFlowServiceTest {
                 "test_token", "test_phone_id", "test_verify_token", "test_secret",
                 "v21.0", "https://mymobi-test.onrender.com"
         );
-        documentFlow = new LoanDocumentFlowService(screenService, messageService, userStore, loanStore, documentStore, documentHtmlService, properties);
+        documentFlow = new LoanDocumentFlowService(screenService, messageService, mpesaService, userStore, loanStore, documentStore, documentHtmlService, properties);
     }
 
     // ==================== LOAN STATEMENT ====================
@@ -96,7 +104,7 @@ class LoanDocumentFlowServiceTest {
     }
 
     @Test
-    void confirmingLoanStatementSendsStkPushPromptFirst() {
+    void confirmingLoanStatementTriggersTheStkPushForTheCorrectAmount() {
         RegisteredUser user = new RegisteredUser();
         user.setUpn("12345");
         userStore.save(FROM, user);
@@ -106,12 +114,11 @@ class LoanDocumentFlowServiceTest {
 
         documentFlow.handleConfirmLoanStatement(FROM, session);
 
-        verify(messageService).sendTextMessage(eq(FROM),
-                eq("You are about to pay KES 23.20 to MyMobi account XXXXX. Please enter your Mpesa PIN."));
-            }
+        verify(mpesaService).initiateStkPush(FROM, 23.20, "loan_statement");
+    }
 
     @Test
-    void confirmingLoanStatementGeneratesADocumentLink() {
+        void confirmingLoanStatementGeneratesADocumentLink() {
         RegisteredUser user = new RegisteredUser();
         user.setUpn("12345");
         userStore.save(FROM, user);
@@ -165,20 +172,19 @@ class LoanDocumentFlowServiceTest {
     }
 
     @Test
-    void confirmingLoanClearanceSendsStkPushPromptFirst() {
+    void confirmingLoanClearanceTriggersTheStkPushForTheCorrectAmount() {
         RegisteredUser user = new RegisteredUser();
         user.setUpn("12345");
         userStore.save(FROM, user);
         Loan paid = new Loan();
         paid.setStatus("paid");
-        loanStore.save(FROM, paid);
+                loanStore.save(FROM, paid);
 
         UserSession session = new UserSession();
 
         documentFlow.handleConfirmLoanClearance(FROM, session);
 
-        verify(messageService).sendTextMessage(eq(FROM),
-                eq("You are about to pay KES 23.20 to MyMobi account XXXXX. Please enter your Mpesa PIN."));
+        verify(mpesaService).initiateStkPush(FROM, 23.20, "loan_clearance");
     }
 
     @Test
