@@ -25,10 +25,19 @@ import java.util.concurrent.TimeUnit;
  * WORKSTREAM B (reactive -> synchronous): every method here used to
  * return Mono<Void>, chaining follow-up screens with .then(). All
  * converted to plain blocking void methods with sequential statements.
- * deliverApprovalCodeAfterDelay's error handling changed from
- * .doOnError().subscribe() to a plain try/catch, since sendTextMessage()
- * now throws directly instead of carrying errors on a reactive error
- * channel.
+ *
+ * WORKSTREAM F (mock service abstraction layer): Approval Code delivery
+ * is genuinely more than "send an SMS" - it also needs a staleness
+ * check and then chains to the Approve Loan screen, both delayed by the
+ * same simulated SMS latency. Rather than wrap smsService.sendSms(...)
+ * (which already has its own internal delay) inside ANOTHER delay - which
+ * would double the wait before the person sees the code - the two
+ * concerns are split: smsService.sendSms(...) is called directly for
+ * the SMS text (it handles its own delay), while
+ * scheduleApproveLoanScreenAfterDelay() independently schedules the
+ * staleness-check-then-screen part on the same delay duration, as its
+ * own loan-application-specific concern that doesn't belong inside a
+ * generic SmsService.
  */
 @Service
 public class LoanApplicationFlowService {
@@ -36,6 +45,7 @@ public class LoanApplicationFlowService {
     private static final Logger log = LoggerFactory.getLogger(LoanApplicationFlowService.class);
     private static final int MIN_LOAN_AMOUNT = 1000;
     private static final int MAX_PAYROLL_ATTEMPTS = 3;
+    private static final long APPROVAL_SCREEN_DELAY_SECONDS = 5;
 
     private static final Map<String, TenureOption> TENURE_OPTIONS = Map.of(
             "tenure_1", new TenureOption(1, 20000, "1 Month"),
@@ -45,6 +55,7 @@ public class LoanApplicationFlowService {
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
+    private final SmsService smsService;
     private final LoanStore loanStore;
     private final RegisteredUserStore userStore;
     private final LoanCalculationService calculationService;
@@ -52,12 +63,14 @@ public class LoanApplicationFlowService {
     public LoanApplicationFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
+                    SmsService smsService,
             LoanStore loanStore,
             RegisteredUserStore userStore,
             LoanCalculationService calculationService
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
+        this.smsService = smsService;
         this.loanStore = loanStore;
         this.userStore = userStore;
         this.calculationService = calculationService;
@@ -73,7 +86,7 @@ public class LoanApplicationFlowService {
         if (hasActiveLoan) {
             messageService.sendTextMessage(to, "You already have an active loan. Please complete or repay it before applying for a new one.");
             screenService.sendMainMenu(to);
-                        return;
+            return;
         }
 
         session.setCurrentMenu("loan_tenure_menu");
@@ -115,7 +128,7 @@ public class LoanApplicationFlowService {
         }
         if (amount > session.getLoanLimit()) {
             messageService.sendTextMessage(to,
-                    "That exceeds your loan limit of KES " + session.getLoanLimit() + ". Please enter a lower amount.");
+                                    "That exceeds your loan limit of KES " + session.getLoanLimit() + ". Please enter a lower amount.");
             return;
         }
 
@@ -147,7 +160,8 @@ public class LoanApplicationFlowService {
             messageService.sendTextMessage(to, "UPN should be up to 11 digits and start with 1 or 2. Please try again.");
             return;
         }
-                Optional<RegisteredUser> registeredUser = userStore.findByPhoneNumber(to);
+
+        Optional<RegisteredUser> registeredUser = userStore.findByPhoneNumber(to);
         boolean matches = registeredUser.isPresent() && text.equals(registeredUser.get().getUpn());
 
         if (!matches) {
@@ -179,7 +193,7 @@ public class LoanApplicationFlowService {
         loan.setTenureMonths(session.getLoanTenureMonths());
         loan.setBreakdown(breakdown);
         loan.setPayrollNumber(payrollNumber);
-        loan.setRefNo(refNo);
+                loan.setRefNo(refNo);
         loan.setApprovalCode(approvalCode);
         loan.setDueDate(dueDate);
         loan.setStatus("pending_approval");
@@ -193,44 +207,42 @@ public class LoanApplicationFlowService {
         clearLoanApplicationFields(session);
         session.setPayrollNumberAttempts(0);
 
-        deliverApprovalCodeAfterDelay(to, approvalCode, refNo);
+        smsService.sendSms(to, "Approval Code " + approvalCode);
+        scheduleApproveLoanScreenAfterDelay(to, refNo);
 
         messageService.sendTextMessage(to, "Your loan request has been submitted. Please wait for the approval code SMS from MyMobi.");
     }
 
     /**
-     * Simulates SMS delivery of the approval code, arriving as a
-     * separate WhatsApp message a few seconds later, followed directly
-     * by the Approve Loan screen itself - skipping Main Menu entirely,
-     * so the person doesn't need an extra tap to get to Approve Loan
-     * right when the code they're waiting for actually arrives.
-     * TODO: remove once a real SMS/backend delivers this for real.
+     * Shows the Approve Loan screen after the same delay used for the
+     * simulated SMS, skipping Main Menu entirely so the person doesn't
+     * need an extra tap to get to Approve Loan right when the code
+     * they're waiting for actually arrives.
      *
-     * Includes a staleness check: only delivers if the loan is STILL the
-     * same one, still pending - avoiding a confusing stale delivery if
-     * the loan was cancelled or superseded in the meantime.
+     * Includes a staleness check: only shows the screen if the loan is
+     * STILL the same one, still pending - avoiding a confusing stale
+     * screen if the loan was cancelled or superseded in the meantime.
      */
-    private void deliverApprovalCodeAfterDelay(String to, String approvalCode, String refNo) {
+    private void scheduleApproveLoanScreenAfterDelay(String to, String refNo) {
         CompletableFuture.runAsync(
                 () -> {
                     Optional<Loan> current = loanStore.findByPhoneNumber(to);
                     boolean stillPending = current.isPresent()
                             && refNo.equals(current.get().getRefNo())
                             && "pending_approval".equals(current.get().getStatus());
-                    
+
                     if (!stillPending) {
-                        log.info("stale_approval_code_delivery_skipped to={} refNo={}", to, refNo);
+                        log.info("stale_approval_screen_delivery_skipped to={} refNo={}", to, refNo);
                         return;
                     }
 
                     try {
-                        messageService.sendTextMessage(to, "Approval Code " + approvalCode);
                         screenService.sendApproveLoanDetails(to, current.get());
                     } catch (Exception err) {
-                        log.error("Failed to deliver approval code to {}: {}", to, err.getMessage());
+                        log.error("Failed to show Approve Loan screen to {}: {}", to, err.getMessage());
                     }
                 },
-                CompletableFuture.delayedExecutor(5, TimeUnit.SECONDS)
+                CompletableFuture.delayedExecutor(APPROVAL_SCREEN_DELAY_SECONDS, TimeUnit.SECONDS)
         );
     }
 
@@ -246,7 +258,7 @@ public class LoanApplicationFlowService {
         String currentMenu = session.getCurrentMenu();
 
         if ("loan_tenure_menu".equals(currentMenu)) {
-            screenService.sendMainMenu(to);
+                        screenService.sendMainMenu(to);
             return;
         }
         if ("loan_amount_menu".equals(currentMenu)) {
