@@ -20,21 +20,29 @@ import java.time.Instant;
  * have the phone number as their own "to" parameter throughout.
  *
  * breakdown is @Embedded - LoanBreakdown is marked @Embeddable and
- * stores its 5 fields directly as columns on this same loans table,
+ * stores its 6 fields directly as columns on this same loans table,
  * rather than needing its own separate table. @AttributeOverrides
- * renames every one of those 5 columns with a breakdown_ prefix -
+ * renames every one of those 6 columns with a breakdown_ prefix -
  * without this, LoanBreakdown.loanAmount would map to the exact same
  * physical column name (loan_amount) that Loan's own top-level
  * loanAmount field already uses, which Hibernate correctly rejects as a
  * DuplicateMappingException rather than silently colliding the two.
+ *
+ * WORKSTREAM F (mock service abstraction layer): updated for
+ * LoanBreakdown's renamed fields (upfrontFee -> totalDeductions,
+ * monthlyInstallment -> installmentPerMonth) and the new totalRepayment
+ * field - ddl-auto=update will add the new breakdown_total_repayment
+ * column automatically; no manual migration needed given the current
+ * pragmatic ddl-auto setting.
  */
 @Entity
 @Table(name = "loans")
 @AttributeOverrides({
         @AttributeOverride(name = "loanAmount", column = @Column(name = "breakdown_loan_amount")),
-        @AttributeOverride(name = "upfrontFee", column = @Column(name = "breakdown_upfront_fee")),
+        @AttributeOverride(name = "totalDeductions", column = @Column(name = "breakdown_total_deductions")),
         @AttributeOverride(name = "disbursement", column = @Column(name = "breakdown_disbursement")),
-        @AttributeOverride(name = "monthlyInstallment", column = @Column(name = "breakdown_monthly_installment")),
+        @AttributeOverride(name = "installmentPerMonth", column = @Column(name = "breakdown_installment_per_month")),
+        @AttributeOverride(name = "totalRepayment", column = @Column(name = "breakdown_total_repayment")),
         @AttributeOverride(name = "platformFee", column = @Column(name = "breakdown_platform_fee"))
 })
 public class Loan {
