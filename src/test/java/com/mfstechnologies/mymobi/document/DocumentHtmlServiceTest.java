@@ -34,7 +34,7 @@ class DocumentHtmlServiceTest {
         loan.setInstallmentsPaid(1);
         loan.setDueDate("2026-10-19");
         loan.setStatus("approved");
-        loan.setBreakdown(new LoanBreakdown(15000, 2943, 32057, 14442, 450));
+        loan.setBreakdown(new LoanBreakdown(15000, 2943, 32057, 14442, 43776, 450));
         return loan;
     }
 
