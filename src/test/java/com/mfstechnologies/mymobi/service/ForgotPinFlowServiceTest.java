@@ -16,6 +16,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -39,6 +40,10 @@ import static org.mockito.Mockito.*;
  * instead of a plain text prompt - including every retry path, which
  * must re-send the Flow so the person never has to fall back to typing
  * the value directly into the chat.
+ *
+ * WORKSTREAM F (mock service abstraction layer): OTP delivery now goes
+ * through smsService.sendSms(...) (mocked here) instead of an inline
+ * CompletableFuture-based simulation.
  */
 @ExtendWith(MockitoExtension.class)
 class ForgotPinFlowServiceTest {
@@ -50,20 +55,22 @@ class ForgotPinFlowServiceTest {
     @Mock
     private WhatsAppMessageService messageService;
     @Mock
+    private SmsService smsService;
+    @Mock
     private RegisteredUserRepository registeredUserRepository;
 
     private RegisteredUserStore userStore;
     private LoginLockoutService lockoutService;
     private ForgotPinFlowService forgotPinFlowService;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-
+    
     @BeforeEach
     void setUp() {
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
         userStore = new RegisteredUserStore(registeredUserRepository);
         lockoutService = new LoginLockoutService(600);
-        forgotPinFlowService = new ForgotPinFlowService(screenService, messageService, userStore, passwordEncoder, lockoutService);
-            }
+        forgotPinFlowService = new ForgotPinFlowService(screenService, messageService, smsService, userStore, passwordEncoder, lockoutService);
+    }
 
     @Test
     void noAccountFoundReturnsAHelpfulMessage() {
@@ -86,7 +93,7 @@ class ForgotPinFlowServiceTest {
     }
 
     @Test
-    void existingAccountGetsAnOtpAndMovesToOtpStep() {
+    void existingAccountGetsAnOtpSentViaSmsAndMovesToOtpStep() {
         userStore.save(FROM, new RegisteredUser());
         UserSession session = new UserSession();
 
@@ -94,6 +101,8 @@ class ForgotPinFlowServiceTest {
 
         assertThat(session.getStep()).isEqualTo("forgot_pin_enter_otp");
         assertThat(session.getOtp()).matches("^\\d{5}$");
+        // WORKSTREAM F: OTP delivery now goes through SmsService.
+        verify(smsService).sendSms(eq(FROM), contains(session.getOtp()));
         // WORKSTREAM E: OTP entry now goes through the Flow webview.
         verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
@@ -117,9 +126,9 @@ class ForgotPinFlowServiceTest {
         forgotPinFlowService.handleEnterOtp(FROM, "00000", session);
 
         assertThat(session.getOtpAttempts()).isEqualTo(1);
-        verify(messageService).sendTextMessage(eq(FROM), org.mockito.ArgumentMatchers.contains("2 attempt(s) remaining"));
+        verify(messageService).sendTextMessage(eq(FROM), contains("2 attempt(s) remaining"));
         // WORKSTREAM E: the Flow must be re-sent so the retry also
-        // happens securely, not by falling back to typing in chat.
+            // happens securely, not by falling back to typing in chat.
         verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
@@ -128,7 +137,7 @@ class ForgotPinFlowServiceTest {
         UserSession session = new UserSession();
         session.setOtp("12345");
         session.setOtpAttempts(2);
-        
+
         forgotPinFlowService.handleEnterOtp(FROM, "00000", session);
 
         assertThat(lockoutService.getLockoutMinutesRemaining(FROM)).isGreaterThan(0);
@@ -180,4 +189,3 @@ class ForgotPinFlowServiceTest {
         verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 }
-        
