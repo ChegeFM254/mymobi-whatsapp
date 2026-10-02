@@ -16,6 +16,13 @@ import java.util.Optional;
  * returning Mono.empty() as a no-op duplicate-payment guard). All
  * converted to plain blocking void methods with sequential statements;
  * the guard is now a plain early return.
+ *
+ * WORKSTREAM F (mock service abstraction layer): the inline M-Pesa STK
+ * push simulation is now delegated to MpesaService. This also fixes a
+ * genuine gap - this flow previously never actually sent the person any
+ * "enter your M-Pesa PIN" message at all (only PayslipFlowService and
+ * LoanDocumentFlowService did), so payments here went straight to the
+ * result message with no STK push explanation in between.
  */
 @Service
 public class LoanPaymentFlowService {
@@ -24,15 +31,18 @@ public class LoanPaymentFlowService {
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
+    private final MpesaService mpesaService;
     private final LoanStore loanStore;
 
     public LoanPaymentFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
+            MpesaService mpesaService,
             LoanStore loanStore
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
+        this.mpesaService = mpesaService;
         this.loanStore = loanStore;
     }
 
@@ -99,7 +109,7 @@ public class LoanPaymentFlowService {
         int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().monthlyInstallment() : 14442;
         int payAmount = monthlyInstallment * installments;
 
-        log.info("mpesa_stk_push_simulated to={} installments={} payAmount={}", to, installments, payAmount);
+        mpesaService.initiateStkPush(to, payAmount, "loan_payment");
 
         loan.setInstallmentsPaid(loan.getInstallmentsPaid() + installments);
         session.setPendingPaymentInstallments(null);
