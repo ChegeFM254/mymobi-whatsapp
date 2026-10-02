@@ -26,6 +26,13 @@ import static org.mockito.Mockito.*;
  * loanStore here is wired to a fake, in-memory-backed repository (see
  * FakeRepositories) so it keeps behaving like a real, working
  * collaborator, exactly as it did with the old ConcurrentHashMap.
+ *
+ * WORKSTREAM F (mock service abstraction layer): the inline M-Pesa STK
+ * push simulation is now delegated to MpesaService (mocked here) -
+ * confirmingAPartialPaymentUpdatesInstallmentsAndStaysApproved and
+ * confirmingTheFinalPaymentMarksTheLoanAsPaid both now verify the call
+ * directly, since this flow previously never sent any STK push message
+ * at all.
  */
 @ExtendWith(MockitoExtension.class)
 class LoanPaymentFlowServiceTest {
@@ -37,6 +44,8 @@ class LoanPaymentFlowServiceTest {
     @Mock
     private WhatsAppMessageService messageService;
     @Mock
+    private MpesaService mpesaService;
+    @Mock
     private LoanRepository loanRepository;
 
     private LoanStore loanStore;
@@ -46,7 +55,7 @@ class LoanPaymentFlowServiceTest {
     void setUp() {
         FakeRepositories.wireAsInMemoryStore(loanRepository, Loan::getPhoneNumber);
         loanStore = new LoanStore(loanRepository);
-        paymentFlow = new LoanPaymentFlowService(screenService, messageService, loanStore);
+        paymentFlow = new LoanPaymentFlowService(screenService, messageService, mpesaService, loanStore);
     }
 
     private Loan approvedLoan(int tenureMonths, int installmentsPaid) {
@@ -54,7 +63,7 @@ class LoanPaymentFlowServiceTest {
         loan.setTenureMonths(tenureMonths);
         loan.setInstallmentsPaid(installmentsPaid);
         loan.setBreakdown(new LoanBreakdown(15000, 2943, 32057, 14442, 150));
-        loan.setStatus("approved");
+                loan.setStatus("approved");
         loan.setRefNo("MVCAGHD1");
         return loan;
     }
@@ -119,8 +128,9 @@ class LoanPaymentFlowServiceTest {
         paymentFlow.handleConfirmPayLoan(FROM, session);
 
         assertThat(loan.getInstallmentsPaid()).isEqualTo(1);
-        assertThat(loan.getStatus()).isEqualTo("approved");
+                assertThat(loan.getStatus()).isEqualTo("approved");
         assertThat(session.getPendingPaymentInstallments()).isNull();
+        verify(mpesaService).initiateStkPush(FROM, 14442, "loan_payment");
         verify(messageService).sendTextMessage(eq(FROM),
                 eq("Your installment of KES 14,442 Ref: MVCAGHD1 has been paid. You have a loan balance of KES 28,884. Thank you for using MyMobi services."));
     }
@@ -136,6 +146,7 @@ class LoanPaymentFlowServiceTest {
 
         assertThat(loan.getInstallmentsPaid()).isEqualTo(3);
         assertThat(loan.getStatus()).isEqualTo("paid");
+        verify(mpesaService).initiateStkPush(FROM, 14442, "loan_payment");
         verify(messageService).sendTextMessage(eq(FROM),
                 eq("Your installment of KES 14,442 Ref: MVCAGHD1 has been paid. Your loan has been fully paid. Thank you for using MyMobi services."));
         verify(screenService).sendHomeScreen(FROM, session);
@@ -152,6 +163,7 @@ class LoanPaymentFlowServiceTest {
         paymentFlow.handleConfirmPayLoan(FROM, session);
 
         assertThat(loan.getInstallmentsPaid()).isEqualTo(2);
+        verify(mpesaService).initiateStkPush(FROM, 28884, "loan_payment");
         verify(messageService).sendTextMessage(eq(FROM),
                 eq("Your installment of KES 28,884 Ref: MVCAGHD1 has been paid. You have a loan balance of KES 14,442. Thank you for using MyMobi services."));
     }
@@ -168,6 +180,7 @@ class LoanPaymentFlowServiceTest {
 
         assertThat(loan.getInstallmentsPaid()).isZero(); // unaffected by the second tap
         verifyNoInteractions(messageService);
+        verifyNoInteractions(mpesaService);
     }
 
     // ==================== CANCEL ====================
@@ -182,3 +195,4 @@ class LoanPaymentFlowServiceTest {
         assertThat(session.getPendingPaymentInstallments()).isNull();
     }
 }
+        
