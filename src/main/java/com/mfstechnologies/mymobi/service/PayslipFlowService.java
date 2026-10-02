@@ -23,6 +23,12 @@ import java.util.Optional;
  * generation. All converted to plain blocking void methods with
  * sequential statements; the defer wrapper is simply gone, since there's
  * no longer a reactive pipeline for it to defer within.
+ *
+ * WORKSTREAM F (mock service abstraction layer): the inline M-Pesa STK
+ * push simulation (log line + manually-formatted message) is now
+ * delegated to MpesaService, giving this flow - and every other one that
+ * needs M-Pesa - a single, consistent seam to swap in a real integration
+ * through later.
  */
 @Service
 public class PayslipFlowService {
@@ -32,6 +38,7 @@ public class PayslipFlowService {
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
+    private final MpesaService mpesaService;
     private final RegisteredUserStore userStore;
     private final DocumentStore documentStore;
     private final DocumentHtmlService documentHtmlService;
@@ -40,6 +47,7 @@ public class PayslipFlowService {
     public PayslipFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
+            MpesaService mpesaService,
             RegisteredUserStore userStore,
             DocumentStore documentStore,
             DocumentHtmlService documentHtmlService,
@@ -47,6 +55,7 @@ public class PayslipFlowService {
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
+        this.mpesaService = mpesaService;
         this.userStore = userStore;
         this.documentStore = documentStore;
         this.documentHtmlService = documentHtmlService;
@@ -90,10 +99,7 @@ public class PayslipFlowService {
         RegisteredUser user = userOpt.get();
         double cost = DOCUMENT_COST_PER_UNIT * months;
 
-        messageService.sendTextMessage(to,
-                String.format("You are about to pay KES %.2f to MyMobi account XXXXX. Please enter your Mpesa PIN.", cost));
-
-        log.info("mpesa_stk_push_simulated to={} purpose=payslip months={}", to, months);
+        mpesaService.initiateStkPush(to, cost, "payslip");
 
         String html = documentHtmlService.generatePayslipHtml(user, months);
 
