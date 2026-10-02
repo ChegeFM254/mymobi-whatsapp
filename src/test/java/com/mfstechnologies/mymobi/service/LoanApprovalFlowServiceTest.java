@@ -66,7 +66,7 @@ class LoanApprovalFlowServiceTest {
         loan.setApprovalCode("654321");
         loan.setStatus("pending_approval");
         loan.setDueDate("2026-08-19");
-        loan.setBreakdown(new LoanBreakdown(15000, 2943, 32057, 14442, 150));
+        loan.setBreakdown(new LoanBreakdown(15000, 2943, 32057, 14442, 14592, 150));
         return loan;
     }
 
