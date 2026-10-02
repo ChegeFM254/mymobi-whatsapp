@@ -12,16 +12,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
  * WORKSTREAM B (reactive -> synchronous): every method here used to
  * return Mono<Void>, chaining follow-up screens with .then(). All
  * converted to plain blocking void methods with sequential statements.
- * deliverOtpAfterDelay's error handling changed from .doOnError().
- * subscribe() to a plain try/catch, since sendTextMessage() now throws
- * directly instead of carrying errors on a reactive error channel.
  *
  * WORKSTREAM E (WhatsApp Flows webview for PIN/OTP/Approval Code): every
  * OTP/PIN entry point here now goes through the WhatsApp Flow webview
@@ -30,6 +25,11 @@ import java.util.concurrent.TimeUnit;
  * without that, the person's only way to retry would be falling back to
  * typing the value directly into the chat, defeating the whole point of
  * using the Flow in the first place.
+ *
+ * WORKSTREAM F (mock service abstraction layer): the inline
+ * CompletableFuture-based "deliverOtpAfterDelay" simulation is gone -
+ * OTP delivery is now a single smsService.sendSms(...) call, delegating
+ * the delay/retry/delivery mechanics to SmsService entirely.
  */
 @Service
 public class ForgotPinFlowService {
@@ -39,6 +39,7 @@ public class ForgotPinFlowService {
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
+    private final SmsService smsService;
     private final RegisteredUserStore userStore;
     private final PasswordEncoder passwordEncoder;
     private final LoginLockoutService lockoutService;
@@ -46,12 +47,14 @@ public class ForgotPinFlowService {
     public ForgotPinFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
+            SmsService smsService,
             RegisteredUserStore userStore,
             PasswordEncoder passwordEncoder,
             LoginLockoutService lockoutService
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
+        this.smsService = smsService;
         this.userStore = userStore;
         this.passwordEncoder = passwordEncoder;
         this.lockoutService = lockoutService;
@@ -63,7 +66,7 @@ public class ForgotPinFlowService {
             messageService.sendTextMessage(to,
                     "Too many incorrect attempts. Your account is temporarily locked. Please try again in " + lockoutMinutes + " minute(s).");
             return;
-                    }
+        }
 
         Optional<RegisteredUser> existing = userStore.findByPhoneNumber(to);
         if (existing.isEmpty()) {
@@ -77,7 +80,7 @@ public class ForgotPinFlowService {
         session.setOtpAttempts(0);
         session.setStep("forgot_pin_enter_otp");
 
-        deliverOtpAfterDelay(to, otp);
+        smsService.sendSms(to, "OTP " + otp);
         screenService.sendCodeEntryFlow(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:", "Enter OTP");
     }
 
@@ -128,7 +131,7 @@ public class ForgotPinFlowService {
 
     public void handleConfirmNewPin(String to, String text, UserSession session) {
         if (!text.equals(session.getNewPin())) {
-                        session.setStep("forgot_pin_enter_new_pin");
+            session.setStep("forgot_pin_enter_new_pin");
             screenService.sendCodeEntryFlow(to, "The PINs do not match. Please enter your new 5-digit PIN again:", "Enter PIN");
             return;
         }
@@ -162,23 +165,4 @@ public class ForgotPinFlowService {
         session.setOtpAttempts(0);
         session.setNewPin(null);
     }
-
-    /**
-     * Simulates SMS delivery of the OTP, arriving as a separate WhatsApp
-     * message a few seconds later. TODO: remove once a real SMS/backend
-     * delivers this for real.
-     */
-    private void deliverOtpAfterDelay(String to, String otp) {
-        CompletableFuture.runAsync(
-                () -> {
-                    try {
-                        messageService.sendTextMessage(to, "OTP " + otp);
-                    } catch (Exception err) {
-                        log.error("Failed to deliver simulated OTP to {}: {}", to, err.getMessage());
-                    }
-                },
-                CompletableFuture.delayedExecutor(5, TimeUnit.SECONDS)
-        );
-    }
 }
-            
