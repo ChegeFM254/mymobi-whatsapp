@@ -11,13 +11,23 @@ import jakarta.persistence.Embeddable;
  * EmbeddableInstantiator needed. Note this is a Hibernate-specific
  * extension, not part of the JPA spec itself, but that's fine since
  * this project isn't targeting portability across JPA providers.
+ *
+ * WORKSTREAM F (mock service abstraction layer): fields renamed to
+ * match MyMobi's actual "Straight Interest Method" terminology
+ * (upfrontFee -> totalDeductions, monthlyInstallment ->
+ * installmentPerMonth), and totalRepayment is new - the period total
+ * including the GoK charge (platformFee), matching the reference
+ * spreadsheet's "Total Repayment (MFS + GoK)" row. platformFee
+ * deliberately stays its own field/display line rather than being
+ * folded into installmentPerMonth.
  */
 @Embeddable
 public record LoanBreakdown(
         int loanAmount,
-        int upfrontFee,
+        int totalDeductions,
         int disbursement,
-        int monthlyInstallment,
+        int installmentPerMonth,
+        int totalRepayment,
         int platformFee
 ) {
 }
