@@ -438,17 +438,18 @@ public class ScreenMessageService {
      * Apply Loan: fee breakdown and Accept/Decline. Direct equivalent of
      * sendLoanBreakdown() in the Node.js version.
      */
-    public void sendLoanBreakdown(String to, com.mfstechnologies.mymobi.model.LoanBreakdown breakdown, int tenureMonths) {
+      public void sendLoanBreakdown(String to, com.mfstechnologies.mymobi.model.LoanBreakdown breakdown, int tenureMonths) {
         String periodLabel = tenureMonths > 1 ? "Months" : "Month";
         String details = String.format(
-                "Loan Amount: KES %,d\nUpfront Fees: KES %,d\nYou Receive: KES %,d\nLoan Period: %d %s\nMonthly Installment: KES %,d\nPlatform Fee: KES %,d\n\nConfirm and Proceed:",
+                "Loan Amount: KES %,d\nTotal Deductions: KES %,d\nLoan Disbursement: KES %,d\nLoan Period: %d %s\nInstallment Per Month: KES %,d\nPlatform Fee: KES %,d\nTotal Repayment: KES %,d\n\nConfirm and Proceed:",
                 breakdown.loanAmount(),
-                breakdown.upfrontFee(),
+                breakdown.totalDeductions(),
                 breakdown.disbursement(),
                 tenureMonths,
                 periodLabel,
-                breakdown.monthlyInstallment(),
-                breakdown.platformFee()
+                breakdown.installmentPerMonth(),
+                breakdown.platformFee(),
+                breakdown.totalRepayment()
         );
 
         Map<String, Object> payload = Map.of(
