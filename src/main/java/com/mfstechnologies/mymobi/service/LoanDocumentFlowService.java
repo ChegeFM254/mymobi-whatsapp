@@ -24,6 +24,12 @@ import java.util.Optional;
  * Mono.defer(...) wrapping the simulated STK push and document
  * generation. All converted to plain blocking void methods with
  * sequential statements; the defer wrapper is simply gone.
+ *
+ * WORKSTREAM F (mock service abstraction layer): the old shared
+ * sendStkPushPrompt() helper (manually formatting the message and
+ * logging inline) is gone entirely - both Loan Statement and Loan
+ * Clearance call mpesaService.initiateStkPush(...) directly now, since
+ * MpesaService itself owns that responsibility.
  */
 @Service
 public class LoanDocumentFlowService {
@@ -33,6 +39,7 @@ public class LoanDocumentFlowService {
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
+    private final MpesaService mpesaService;
     private final RegisteredUserStore userStore;
     private final LoanStore loanStore;
     private final DocumentStore documentStore;
@@ -42,6 +49,7 @@ public class LoanDocumentFlowService {
     public LoanDocumentFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
+            MpesaService mpesaService,
             RegisteredUserStore userStore,
             LoanStore loanStore,
             DocumentStore documentStore,
@@ -50,6 +58,7 @@ public class LoanDocumentFlowService {
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
+                this.mpesaService = mpesaService;
         this.userStore = userStore;
         this.loanStore = loanStore;
         this.documentStore = documentStore;
@@ -82,9 +91,9 @@ public class LoanDocumentFlowService {
         }
         RegisteredUser user = userOpt.get();
         Loan loan = loanOpt.get();
-                sendStkPushPrompt(to, DOCUMENT_COST);
 
-        log.info("mpesa_stk_push_simulated to={} purpose=loan_statement", to);
+        mpesaService.initiateStkPush(to, DOCUMENT_COST, "loan_statement");
+
         String html = documentHtmlService.generateLoanStatementHtml(user, loan);
         generateAndSendDocumentLink(to, "loan_statement", "Loan Statement", user.getUpn(), html, session);
     }
@@ -109,7 +118,7 @@ public class LoanDocumentFlowService {
             messageService.sendTextMessage(to, "You have an outstanding loan balance. Pay Loan to download Loan Clearance Letter.");
             screenService.sendMainMenu(to);
             return;
-        }
+                    }
 
         session.setPendingDocumentType("loan_clearance");
         screenService.sendLoanClearanceConfirm(to, DOCUMENT_COST);
@@ -128,9 +137,8 @@ public class LoanDocumentFlowService {
         RegisteredUser user = userOpt.get();
         Loan loan = loanOpt.get();
 
-        sendStkPushPrompt(to, DOCUMENT_COST);
+        mpesaService.initiateStkPush(to, DOCUMENT_COST, "loan_clearance");
 
-        log.info("mpesa_stk_push_simulated to={} purpose=loan_clearance", to);
         String html = documentHtmlService.generateLoanClearanceHtml(user, loan);
         generateAndSendDocumentLink(to, "loan_clearance", "Loan Clearance Letter", user.getUpn(), html, session);
     }
@@ -142,11 +150,6 @@ public class LoanDocumentFlowService {
     }
 
     // ==================== SHARED ====================
-
-    private void sendStkPushPrompt(String to, double cost) {
-        messageService.sendTextMessage(to,
-                String.format("You are about to pay KES %.2f to MyMobi account XXXXX. Please enter your Mpesa PIN.", cost));
-    }
 
     private void generateAndSendDocumentLink(String to, String docType, String docTitle, String upn, String html, UserSession session) {
         StoredDocument document = new StoredDocument();
