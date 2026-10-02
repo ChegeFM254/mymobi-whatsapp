@@ -42,6 +42,12 @@ import static org.mockito.Mockito.verify;
  * repositories (see FakeRepositories) so they keep behaving like real,
  * working collaborators, exactly as they did with the old
  * ConcurrentHashMap.
+ *
+ * WORKSTREAM F (mock service abstraction layer): LoanBreakdown's fields
+ * were renamed (upfrontFee -> totalDeductions, monthlyInstallment ->
+ * installmentPerMonth) and totalRepayment was added - both breakdown
+ * display tests below reflect the new field names, labels, and the new
+ * Total Repayment line.
  */
 @ExtendWith(MockitoExtension.class)
 class ScreenMessageServiceTest {
@@ -57,13 +63,13 @@ class ScreenMessageServiceTest {
 
     @Captor
     private ArgumentCaptor<Map<String, Object>> payloadCaptor;
-
+    
     private LoanStore loanStore;
     private com.mfstechnologies.mymobi.session.RegisteredUserStore userStore;
     private ScreenMessageService screenService;
 
     @BeforeEach
-        void setUp() {
+    void setUp() {
         FakeRepositories.wireAsInMemoryStore(loanRepository, Loan::getPhoneNumber);
         loanStore = new LoanStore(loanRepository);
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
@@ -122,13 +128,13 @@ class ScreenMessageServiceTest {
 
         List<String> rowIds = capturedRowIds();
         assertThat(rowIds).containsSubsequence("approve_loan_menu", "cancel_loan");
-    }
+            }
 
     @Test
     void showsPayLoanWhenApproved() {
         Loan loan = new Loan();
         loan.setStatus("approved");
-                loanStore.save(FROM, loan);
+        loanStore.save(FROM, loan);
 
         screenService.sendMainMenu(FROM);
 
@@ -187,18 +193,19 @@ class ScreenMessageServiceTest {
     // ==================== sendLoanBreakdown ====================
 
     @Test
-    void loanBreakdownMatchesTheExactRequestedWording() {
-        var breakdown = new com.mfstechnologies.mymobi.model.LoanBreakdown(60000, 6842, 53158, 24500, 450);
+        void loanBreakdownMatchesTheExactRequestedWording() {
+        var breakdown = new com.mfstechnologies.mymobi.model.LoanBreakdown(60000, 6842, 53158, 24500, 73950, 450);
 
         screenService.sendLoanBreakdown(FROM, breakdown, 3);
 
         assertThat(capturedBodyText()).isEqualTo(
-                            "Loan Amount: KES 60,000\n" +
-                "Upfront Fees: KES 6,842\n" +
-                "You Receive: KES 53,158\n" +
+                "Loan Amount: KES 60,000\n" +
+                "Total Deductions: KES 6,842\n" +
+                "Loan Disbursement: KES 53,158\n" +
                 "Loan Period: 3 Months\n" +
-                "Monthly Installment: KES 24,500\n" +
+                "Installment Per Month: KES 24,500\n" +
                 "Platform Fee: KES 450\n" +
+                "Total Repayment: KES 73,950\n" +
                 "\n" +
                 "Confirm and Proceed:"
         );
@@ -206,7 +213,7 @@ class ScreenMessageServiceTest {
 
     @Test
     void loanBreakdownUsesSingularMonthForATenureOfOne() {
-        var breakdown = new com.mfstechnologies.mymobi.model.LoanBreakdown(20000, 2000, 18000, 20000, 150);
+        var breakdown = new com.mfstechnologies.mymobi.model.LoanBreakdown(20000, 2000, 18000, 20000, 20150, 150);
 
         screenService.sendLoanBreakdown(FROM, breakdown, 1);
 
@@ -223,17 +230,18 @@ class ScreenMessageServiceTest {
         loan.setTenureMonths(3);
         loan.setDueDate("2026-10-23");
         loan.setStatus("pending_approval");
-        loan.setBreakdown(new com.mfstechnologies.mymobi.model.LoanBreakdown(60000, 6842, 53158, 24500, 450));
+        loan.setBreakdown(new com.mfstechnologies.mymobi.model.LoanBreakdown(60000, 6842, 53158, 24500, 73950, 450));
 
         screenService.sendApproveLoanDetails(FROM, loan);
 
         assertThat(capturedBodyText()).isEqualTo(
                 "Loan Amount: KES 60,000\n" +
-                "Upfront Fees: KES 6,842\n" +
-                "You Receive: KES 53,158\n" +
+                "Total Deductions: KES 6,842\n" +
+                "Loan Disbursement: KES 53,158\n" +
                 "Loan Period: 3 Months\n" +
-                "Monthly Installment: KES 24,500\n" +
+                "Installment Per Month: KES 24,500\n" +
                 "Platform Fee: KES 450\n" +
+                "Total Repayment: KES 73,950\n" +
                 "Due Date: 2026-10-23\n" +
                 "Status: Pending Approval\n" +
                 "\n" +
@@ -248,15 +256,15 @@ class ScreenMessageServiceTest {
         loan.setTenureMonths(1);
         loan.setDueDate("2026-09-01");
         loan.setStatus("cancelled"); // deliberately NOT pending_approval
-        loan.setBreakdown(new com.mfstechnologies.mymobi.model.LoanBreakdown(20000, 2000, 18000, 20000, 150));
-
-        screenService.sendApproveLoanDetails(FROM, loan);
+        loan.setBreakdown(new com.mfstechnologies.mymobi.model.LoanBreakdown(20000, 2000, 18000, 20000, 20150, 150));
+                screenService.sendApproveLoanDetails(FROM, loan);
 
         assertThat(capturedBodyText()).contains("Status: Cancelled");
         assertThat(capturedBodyText()).doesNotContain("Pending Approval");
     }
 
     // ==================== sendWelcome personalization ====================
+
     @Test
     void welcomeGreetsByNameWhenARegisteredUserExists() {
         var user = new com.mfstechnologies.mymobi.model.RegisteredUser();
@@ -314,14 +322,15 @@ class ScreenMessageServiceTest {
         int upnIndex = body.indexOf("UPN Number:");
         int nationalIdIndex = body.indexOf("National ID Number:");
         int mobileIndex = body.indexOf("Mpesa Mobile Number:");
-        assertThat(firstNameIndex).isLessThan(middleNameIndex);
+                assertThat(firstNameIndex).isLessThan(middleNameIndex);
         assertThat(middleNameIndex).isLessThan(lastNameIndex);
         assertThat(lastNameIndex).isLessThan(emailIndex);
         assertThat(emailIndex).isLessThan(upnIndex);
         assertThat(upnIndex).isLessThan(nationalIdIndex);
         assertThat(nationalIdIndex).isLessThan(mobileIndex);
     }
-        // ==================== sendEditOptions ====================
+
+    // ==================== sendEditOptions ====================
 
     @Test
     void editOptionsIncludesAllSixEditableFieldsPlusExit() {
