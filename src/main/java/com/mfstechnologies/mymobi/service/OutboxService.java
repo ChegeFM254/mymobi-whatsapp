@@ -14,15 +14,20 @@ import java.util.List;
  * WORKSTREAM G (outbox pattern): the write-side API flow services call
  * to durably record "this needs to happen eventually".
  *
- * CRITICAL: enqueue() is deliberately NOT @Transactional itself. The
- * entire point of the outbox pattern is that the outbox row is written
- * in the SAME database transaction as the business action that triggers
- * it (e.g. saving a Loan as pending_approval + enqueueing its
- * APPROVAL_CODE_SMS, atomically - either both happen or neither does).
- * If this method opened its own transaction, that atomicity would be
- * lost. Instead, the CALLING method (in the flow service) must itself
- * be @Transactional, so Spring enlists both the repository.save(loan)
- * call and this enqueue() call in one transaction.
+ * enqueue() itself is NOT @Transactional - calling it alone just writes
+ * one row with the repository's own default transaction, which is fine
+ * on its own but does NOT give the atomicity-with-a-business-write
+ * guarantee that's the entire point of the pattern.
+ *
+ * enqueueWithBusinessWrite() is how callers actually get that guarantee.
+ * IMPORTANT Spring detail: @Transactional only works through Spring's
+ * proxy, which means it does NOT apply to self-invocation (a method on
+ * some bean calling another method on `this` within the same class) -
+ * annotating a flow service's own private submission method with
+ * @Transactional would silently do nothing. Calling
+ * outboxService.enqueueWithBusinessWrite(...) instead - a call to a
+ * genuinely different bean - goes through the proxy correctly, so both
+ * the business write and the outbox write land in one transaction.
  */
 @Service
 public class OutboxService {
