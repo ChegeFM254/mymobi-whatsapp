@@ -1,6 +1,8 @@
 package com.mfstechnologies.mymobi.service;
 
 import com.mfstechnologies.mymobi.model.Loan;
+import com.mfstechnologies.mymobi.model.OutboxEntry;
+import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.RegisteredUser;
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
@@ -30,12 +32,17 @@ import static org.mockito.Mockito.*;
  * working collaborators, exactly as they did with the old
  * ConcurrentHashMap.
  *
- * WORKSTREAM F (mock service abstraction layer): Approval Code delivery
- * now goes through smsService.sendSms(...) (mocked here) for the SMS
- * text itself - the staleness-check-then-screen part stays as this
- * flow's own delayed task and isn't directly observable from a
- * synchronous unit test (same as before this change), so it isn't
- * asserted on here.
+ * WORKSTREAM G (outbox pattern): Approval Code delivery now goes through
+ * outboxService.enqueueWithBusinessWrite(...) instead of a direct
+ * SmsService call. OutboxService itself is mocked here (not wired via
+ * FakeRepositories like LoanStore/RegisteredUserStore) since OutboxEntry
+ * has an auto-generated id that FakeRepositories' generic in-memory
+ * wiring doesn't model - OutboxService gets its own dedicated test for
+ * that. The mock's enqueueWithBusinessWrite is stubbed to actually
+ * invoke the given Runnable, since that's what runs the real
+ * loanStore.save(...) call this flow depends on - without that stub,
+ * the mock would silently swallow the runnable and the loan would never
+ * actually be saved.
  */
 @ExtendWith(MockitoExtension.class)
 class LoanApplicationFlowServiceTest {
@@ -47,7 +54,7 @@ class LoanApplicationFlowServiceTest {
     @Mock
     private WhatsAppMessageService messageService;
     @Mock
-    private SmsService smsService;
+    private OutboxService outboxService;
     @Mock
     private RegisteredUserRepository registeredUserRepository;
     @Mock
@@ -56,7 +63,7 @@ class LoanApplicationFlowServiceTest {
     private LoanStore loanStore;
     private RegisteredUserStore userStore;
     private LoanCalculationService calculationService;
-    private LoanApplicationFlowService loanFlow;
+        private LoanApplicationFlowService loanFlow;
 
     @BeforeEach
     void setUp() {
@@ -65,7 +72,13 @@ class LoanApplicationFlowServiceTest {
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
         userStore = new RegisteredUserStore(registeredUserRepository);
         calculationService = new MockLoanCalculationService();
-        loanFlow = new LoanApplicationFlowService(screenService, messageService, smsService, loanStore, userStore, calculationService);
+        loanFlow = new LoanApplicationFlowService(screenService, messageService, outboxService, loanStore, userStore, calculationService);
+
+        lenient().when(outboxService.enqueueWithBusinessWrite(any(), any(), any())).thenAnswer(invocation -> {
+            Runnable businessWrite = invocation.getArgument(2);
+            businessWrite.run();
+            return new OutboxEntry();
+        });
     }
 
     // ==================== APPLY LOAN ====================
@@ -115,7 +128,7 @@ class LoanApplicationFlowServiceTest {
         session.setLoanLimit(20000);
 
         loanFlow.handleEnterLoanAmount(FROM, "abc", session);
-
+        
         assertThat(session.getLoanAmount()).isNull();
     }
 
@@ -128,7 +141,7 @@ class LoanApplicationFlowServiceTest {
 
         assertThat(session.getLoanAmount()).isNull();
     }
-    
+
     @Test
     void loanAmountAboveTenureLimitIsRejected() {
         UserSession session = new UserSession();
@@ -180,7 +193,7 @@ class LoanApplicationFlowServiceTest {
     // ==================== PAYROLL NUMBER + SUBMISSION ====================
 
     @Test
-    void payrollNumberNotMatchingRegisteredUpnIncrementsAttempts() {
+            void payrollNumberNotMatchingRegisteredUpnIncrementsAttempts() {
         RegisteredUser user = new RegisteredUser();
         user.setUpn("19999999");
         userStore.save(FROM, user);
@@ -193,7 +206,7 @@ class LoanApplicationFlowServiceTest {
 
         assertThat(session.getPayrollNumberAttempts()).isEqualTo(1);
         assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
-            }
+    }
 
     @Test
     void thirdWrongPayrollNumberCancelsTheApplication() {
@@ -231,8 +244,17 @@ class LoanApplicationFlowServiceTest {
         assertThat(submitted.getRefNo()).isNotBlank();
         assertThat(submitted.getApprovalCode()).matches("^\\d{6}$");
         assertThat(session.getLoanAmount()).isNull(); // session fields cleared after submission
-        // WORKSTREAM F: Approval Code delivery now goes through SmsService.
-        verify(smsService).sendSms(eq(FROM), contains(submitted.getApprovalCode()));
+
+        // WORKSTREAM G: Approval Code delivery now goes through the
+        // outbox, atomically with the loan save.
+        verify(outboxService).enqueueWithBusinessWrite(
+                eq(OutboxEntryType.APPROVAL_CODE_SMS),
+                argThat(payload -> payload instanceof OutboxPayloads.ApprovalCodeSmsPayload p
+                        && p.phoneNumber().equals(FROM)
+                        && p.message().contains(submitted.getApprovalCode())
+                        && p.refNo().equals(submitted.getRefNo())),
+                any()
+        );
     }
 
     // ==================== BACK NAVIGATION ====================
@@ -258,7 +280,7 @@ class LoanApplicationFlowServiceTest {
     }
 
     @Test
-        void backFromBreakdownGoesToLoanAmountMenu() {
+    void backFromBreakdownGoesToLoanAmountMenu() {
         UserSession session = new UserSession();
         session.setCurrentMenu("loan_breakdown_menu");
         session.setLoanLimit(20000);
