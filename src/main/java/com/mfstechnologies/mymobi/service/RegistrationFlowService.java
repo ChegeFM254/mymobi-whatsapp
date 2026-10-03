@@ -1,5 +1,6 @@
 package com.mfstechnologies.mymobi.service;
 
+import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.RegisteredUser;
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
@@ -53,17 +54,21 @@ import java.util.Map;
  * falling back to typing the value directly into the chat, defeating the
  * whole point of using the Flow in the first place.
  *
- * WORKSTREAM F (mock service abstraction layer): the inline
- * CompletableFuture-based "deliverOtpAfterDelay" simulation is gone -
- * OTP delivery is now a single smsService.sendSms(...) call, delegating
- * the delay/retry/delivery mechanics to SmsService entirely.
+ * WORKSTREAM G (outbox pattern): the direct smsService.sendSms(...) call
+ * for the registration OTP is gone - handleConfirmDetails now calls
+ * outboxService.enqueue(...) instead, a plain enqueue rather than
+ * enqueueWithBusinessWrite (unlike LoanApplicationFlowService's Approval
+ * Code case). There's genuinely no business write to pair atomically
+ * with here - at this point in the flow nothing has been persisted yet;
+ * the RegisteredUser isn't created until completeRegistration() runs,
+ * well after the person has verified this OTP and set their PIN.
  */
 @Service
 public class RegistrationFlowService {
 
     private static final Logger log = LoggerFactory.getLogger(RegistrationFlowService.class);
     private static final int MAX_OTP_ATTEMPTS = 3;
-    
+
     private static final Map<String, String> EDIT_FIELD_LABELS = Map.of(
             "edit_firstname", "First Name",
             "edit_middlename", "Middle Name",
@@ -75,20 +80,20 @@ public class RegistrationFlowService {
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
-    private final SmsService smsService;
+    private final OutboxService outboxService;
     private final RegisteredUserStore userStore;
     private final PasswordEncoder passwordEncoder;
 
     public RegistrationFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
-            SmsService smsService,
+            OutboxService outboxService,
             RegisteredUserStore userStore,
             PasswordEncoder passwordEncoder
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
-        this.smsService = smsService;
+        this.outboxService = outboxService;
         this.userStore = userStore;
         this.passwordEncoder = passwordEncoder;
     }
@@ -123,11 +128,12 @@ public class RegistrationFlowService {
         session.setStep("first_name");
         messageService.sendTextMessage(to, "Enter First Name");
     }
-
+    
     public void handleDeclineTerms(String to, UserSession session) {
         screenService.sendWelcome(to);
     }
-        // ==================== KYC FIELD COLLECTION ====================
+
+    // ==================== KYC FIELD COLLECTION ====================
     // Order: First Name -> Middle Name -> Last Name -> Email Address ->
     // UPN Number -> National ID Number -> Confirmation (Mobile Number is
     // auto-populated from WhatsApp, not a typed step - see WORKSTREAM D).
@@ -187,12 +193,12 @@ public class RegistrationFlowService {
         }
         session.setUpn(text);
         session.setStep("national_id");
-        messageService.sendTextMessage(to, "Enter National ID Number");
+                messageService.sendTextMessage(to, "Enter National ID Number");
     }
 
     public void handleNationalId(String to, String text, UserSession session) {
         if (text == null || text.isBlank()) {
-                        messageService.sendTextMessage(to, "Please enter your National ID Number.");
+            messageService.sendTextMessage(to, "Please enter your National ID Number.");
             return;
         }
         if (!FieldValidators.isValidNationalId(text)) {
@@ -215,7 +221,7 @@ public class RegistrationFlowService {
         session.setOtpAttempts(0);
         session.setStep("enter_otp");
 
-        smsService.sendSms(to, "OTP " + otp);
+        outboxService.enqueue(OutboxEntryType.OTP_SMS, new OutboxPayloads.SmsPayload(to, "OTP " + otp));
         screenService.sendCodeEntryFlow(to, "An OTP has been sent to your M-Pesa number.\n\nPlease enter the OTP:", "Enter OTP");
     }
 
@@ -252,12 +258,12 @@ public class RegistrationFlowService {
         if ("edit_emailaddress".equals(step) && !FieldValidators.isValidEmail(text)) {
             messageService.sendTextMessage(to, "Please enter a valid Email Address (e.g. name@example.com).");
             return;
-        }
+                    }
 
         switch (step) {
             case "edit_firstname" -> session.setFirstName(text);
             case "edit_middlename" -> session.setMiddleName(text);
-                            case "edit_lastname" -> session.setLastName(text);
+            case "edit_lastname" -> session.setLastName(text);
             case "edit_emailaddress" -> session.setEmailAddress(text);
             case "edit_upn" -> session.setUpn(text);
             case "edit_nationalid" -> session.setNationalId(text);
@@ -317,11 +323,12 @@ public class RegistrationFlowService {
 
     public void handleConfirmNewPin(String to, String text, UserSession session) {
         if (!text.equals(session.getNewPin())) {
-            session.setStep("enter_new_pin");
+                        session.setStep("enter_new_pin");
             screenService.sendCodeEntryFlow(to, "The PINs do not match. Please enter your new 5-digit PIN again:", "Enter PIN");
             return;
         }
-                completeRegistration(to, session);
+
+        completeRegistration(to, session);
     }
 
     private void completeRegistration(String to, UserSession session) {
