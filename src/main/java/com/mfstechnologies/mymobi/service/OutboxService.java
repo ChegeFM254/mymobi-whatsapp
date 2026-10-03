@@ -1,5 +1,6 @@
 package com.mfstechnologies.mymobi.service;
 
+import org.springframework.transaction.annotation.Transactional;
 import com.mfstechnologies.mymobi.model.OutboxEntry;
 import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.OutboxStatus;
@@ -58,6 +59,19 @@ public class OutboxService {
         entry.setCreatedAt(Instant.now());
 
         return repository.save(entry);
+    }
+
+    /**
+     * Runs businessWrite() and enqueues the given outbox entry, atomically
+     * in one transaction - this is the method callers should actually
+     * use when they need both to succeed or fail together (see
+     * class-level note on why a plain enqueue() call from within an
+     * @Transactional flow-service method would NOT give this guarantee).
+     */
+    @Transactional
+    public OutboxEntry enqueueWithBusinessWrite(OutboxEntryType type, Object payload, Runnable businessWrite) {
+        businessWrite.run();
+        return enqueue(type, payload);
     }
 
     /** Used by the monitoring endpoint to list entries that exhausted all retries. */
