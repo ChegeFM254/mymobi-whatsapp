@@ -2,6 +2,7 @@ package com.mfstechnologies.mymobi.service;
 
 import com.mfstechnologies.mymobi.model.Loan;
 import com.mfstechnologies.mymobi.model.LoanBreakdown;
+import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.RegisteredUser;
 import com.mfstechnologies.mymobi.model.TenureOption;
 import com.mfstechnologies.mymobi.model.UserSession;
@@ -29,15 +30,24 @@ import java.util.concurrent.TimeUnit;
  * WORKSTREAM F (mock service abstraction layer): Approval Code delivery
  * is genuinely more than "send an SMS" - it also needs a staleness
  * check and then chains to the Approve Loan screen, both delayed by the
- * same simulated SMS latency. Rather than wrap smsService.sendSms(...)
- * (which already has its own internal delay) inside ANOTHER delay - which
- * would double the wait before the person sees the code - the two
- * concerns are split: smsService.sendSms(...) is called directly for
- * the SMS text (it handles its own delay), while
+ * same simulated SMS latency. The two concerns are split:
  * scheduleApproveLoanScreenAfterDelay() independently schedules the
- * staleness-check-then-screen part on the same delay duration, as its
- * own loan-application-specific concern that doesn't belong inside a
+ * staleness-check-then-screen part on its own delay, as its own
+ * loan-application-specific concern that doesn't belong inside a
  * generic SmsService.
+ *
+ * WORKSTREAM G (outbox pattern): the direct smsService.sendSms(...) call
+ * for the Approval Code is gone - submitLoanApplication now calls
+ * outboxService.enqueueWithBusinessWrite(...) instead, which saves the
+ * Loan AND writes the APPROVAL_CODE_SMS outbox entry atomically, in one
+ * database transaction. This means a crash between "loan saved" and
+ * "SMS sent" can no longer lose the approval code silently - either both
+ * happen, or (if the app crashes before the transaction commits) neither
+ * does, and the person can safely resubmit. scheduleApproveLoanScreenAfterDelay
+ * deliberately stays on its own CompletableFuture - losing that screen's
+ * auto-popup is a minor inconvenience (the person can reach Approve Loan
+ * manually from Main Menu), not a durability-critical failure, so it
+ * wasn't moved into the outbox for this pass.
  */
 @Service
 public class LoanApplicationFlowService {
@@ -52,10 +62,9 @@ public class LoanApplicationFlowService {
             "tenure_2", new TenureOption(2, 40000, "2 Months"),
             "tenure_3", new TenureOption(3, 60000, "3 Months")
     );
-
-    private final ScreenMessageService screenService;
+        private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
-    private final SmsService smsService;
+    private final OutboxService outboxService;
     private final LoanStore loanStore;
     private final RegisteredUserStore userStore;
     private final LoanCalculationService calculationService;
@@ -63,14 +72,14 @@ public class LoanApplicationFlowService {
     public LoanApplicationFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
-                    SmsService smsService,
+            OutboxService outboxService,
             LoanStore loanStore,
             RegisteredUserStore userStore,
             LoanCalculationService calculationService
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
-        this.smsService = smsService;
+        this.outboxService = outboxService;
         this.loanStore = loanStore;
         this.userStore = userStore;
         this.calculationService = calculationService;
@@ -118,7 +127,7 @@ public class LoanApplicationFlowService {
 
     public void handleEnterLoanAmount(String to, String text, UserSession session) {
         Integer amount = parsePositiveInteger(text);
-        if (amount == null) {
+                if (amount == null) {
             messageService.sendTextMessage(to, "Please enter a valid loan amount in KES (numbers only, e.g. 35000).");
             return;
         }
@@ -128,7 +137,7 @@ public class LoanApplicationFlowService {
         }
         if (amount > session.getLoanLimit()) {
             messageService.sendTextMessage(to,
-                                    "That exceeds your loan limit of KES " + session.getLoanLimit() + ". Please enter a lower amount.");
+                    "That exceeds your loan limit of KES " + session.getLoanLimit() + ". Please enter a lower amount.");
             return;
         }
 
@@ -183,7 +192,7 @@ public class LoanApplicationFlowService {
     }
 
     private void submitLoanApplication(String to, String payrollNumber, UserSession session) {
-        LoanBreakdown breakdown = calculationService.calculateBreakdown(session.getLoanAmount(), session.getLoanTenureMonths());
+                LoanBreakdown breakdown = calculationService.calculateBreakdown(session.getLoanAmount(), session.getLoanTenureMonths());
         String refNo = CodeGenerator.generateLoanRefNo();
         String approvalCode = CodeGenerator.generateSixDigitCode();
         String dueDate = LocalDate.now().plusMonths(session.getLoanTenureMonths()).toString();
@@ -193,13 +202,24 @@ public class LoanApplicationFlowService {
         loan.setTenureMonths(session.getLoanTenureMonths());
         loan.setBreakdown(breakdown);
         loan.setPayrollNumber(payrollNumber);
-                loan.setRefNo(refNo);
+        loan.setRefNo(refNo);
         loan.setApprovalCode(approvalCode);
         loan.setDueDate(dueDate);
         loan.setStatus("pending_approval");
         loan.setInstallmentsPaid(0);
         loan.setSubmittedAt(Instant.now());
-        loanStore.save(to, loan);
+
+        // WORKSTREAM G: saving the loan and enqueueing its Approval Code
+        // SMS happen atomically, in one transaction - see
+        // OutboxService.enqueueWithBusinessWrite for why a plain
+        // @Transactional on this method wouldn't actually work here
+        // (self-invocation bypasses Spring's transaction proxy).
+        var payload = new OutboxPayloads.ApprovalCodeSmsPayload(to, "Approval Code " + approvalCode, refNo);
+        outboxService.enqueueWithBusinessWrite(
+                OutboxEntryType.APPROVAL_CODE_SMS,
+                payload,
+                () -> loanStore.save(to, loan)
+        );
 
         log.info("loan_application_submitted to={} amount={} tenureMonths={} refNo={}",
                 to, session.getLoanAmount(), session.getLoanTenureMonths(), refNo);
@@ -207,7 +227,6 @@ public class LoanApplicationFlowService {
         clearLoanApplicationFields(session);
         session.setPayrollNumberAttempts(0);
 
-        smsService.sendSms(to, "Approval Code " + approvalCode);
         scheduleApproveLoanScreenAfterDelay(to, refNo);
 
         messageService.sendTextMessage(to, "Your loan request has been submitted. Please wait for the approval code SMS from MyMobi.");
@@ -238,7 +257,7 @@ public class LoanApplicationFlowService {
 
                     try {
                         screenService.sendApproveLoanDetails(to, current.get());
-                    } catch (Exception err) {
+                                            } catch (Exception err) {
                         log.error("Failed to show Approve Loan screen to {}: {}", to, err.getMessage());
                     }
                 },
@@ -258,7 +277,7 @@ public class LoanApplicationFlowService {
         String currentMenu = session.getCurrentMenu();
 
         if ("loan_tenure_menu".equals(currentMenu)) {
-                        screenService.sendMainMenu(to);
+            screenService.sendMainMenu(to);
             return;
         }
         if ("loan_amount_menu".equals(currentMenu)) {
