@@ -1,5 +1,6 @@
 package com.mfstechnologies.mymobi.service;
 
+import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.RegisteredUser;
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
@@ -26,10 +27,12 @@ import java.util.Optional;
  * typing the value directly into the chat, defeating the whole point of
  * using the Flow in the first place.
  *
- * WORKSTREAM F (mock service abstraction layer): the inline
- * CompletableFuture-based "deliverOtpAfterDelay" simulation is gone -
- * OTP delivery is now a single smsService.sendSms(...) call, delegating
- * the delay/retry/delivery mechanics to SmsService entirely.
+ * WORKSTREAM G (outbox pattern): the direct smsService.sendSms(...) call
+ * for the Forgot PIN OTP is gone - handleForgotPin now calls
+ * outboxService.enqueue(...) instead, a plain enqueue (same reasoning as
+ * RegistrationFlowService's OTP): at this point nothing has been
+ * persisted yet, since the existing user's PIN isn't updated until
+ * handleConfirmNewPin runs later, well after this OTP is verified.
  */
 @Service
 public class ForgotPinFlowService {
@@ -39,7 +42,7 @@ public class ForgotPinFlowService {
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
-    private final SmsService smsService;
+    private final OutboxService outboxService;
     private final RegisteredUserStore userStore;
     private final PasswordEncoder passwordEncoder;
     private final LoginLockoutService lockoutService;
@@ -47,20 +50,19 @@ public class ForgotPinFlowService {
     public ForgotPinFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
-            SmsService smsService,
+            OutboxService outboxService,
             RegisteredUserStore userStore,
             PasswordEncoder passwordEncoder,
             LoginLockoutService lockoutService
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
-        this.smsService = smsService;
+        this.outboxService = outboxService;
         this.userStore = userStore;
         this.passwordEncoder = passwordEncoder;
         this.lockoutService = lockoutService;
     }
-
-    public void handleForgotPin(String to, UserSession session) {
+        public void handleForgotPin(String to, UserSession session) {
         long lockoutMinutes = lockoutService.getLockoutMinutesRemaining(to);
         if (lockoutMinutes > 0) {
             messageService.sendTextMessage(to,
@@ -80,7 +82,7 @@ public class ForgotPinFlowService {
         session.setOtpAttempts(0);
         session.setStep("forgot_pin_enter_otp");
 
-        smsService.sendSms(to, "OTP " + otp);
+        outboxService.enqueue(OutboxEntryType.OTP_SMS, new OutboxPayloads.SmsPayload(to, "OTP " + otp));
         screenService.sendCodeEntryFlow(to, "A new OTP has been sent to your registered mobile number.\n\nPlease enter the OTP:", "Enter OTP");
     }
 
@@ -125,7 +127,7 @@ public class ForgotPinFlowService {
         }
 
         session.setNewPin(text);
-        session.setStep("forgot_pin_confirm_new_pin");
+                session.setStep("forgot_pin_confirm_new_pin");
         screenService.sendCodeEntryFlow(to, "Please re-enter your new 5-digit PIN to confirm.", "Confirm PIN");
     }
 
@@ -147,6 +149,12 @@ public class ForgotPinFlowService {
 
         RegisteredUser user = existing.get();
         user.setHashedPin(passwordEncoder.encode(text));
+        // FIXED BUG (unrelated to WORKSTREAM G): findByPhoneNumber()
+        // returns a detached entity outside any transaction - mutating
+        // it alone never persisted the new PIN. Without this save(), the
+        // "successful" reset message was sent but the person's PIN
+        // reset was silently lost; their old PIN still worked.
+        userStore.save(to, user);
 
         log.info("pin_reset to={}", to);
 
