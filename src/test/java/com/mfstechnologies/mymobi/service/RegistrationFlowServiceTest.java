@@ -1,5 +1,7 @@
 package com.mfstechnologies.mymobi.service;
 
+import com.mfstechnologies.mymobi.model.OutboxEntry;
+import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.RegisteredUser;
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
@@ -36,9 +38,11 @@ import static org.mockito.Mockito.*;
  * including every retry path, which must re-send the Flow so the person
  * never has to fall back to typing the value directly into the chat.
  *
- * WORKSTREAM F (mock service abstraction layer): OTP delivery now goes
- * through smsService.sendSms(...) (mocked here) instead of an inline
- * CompletableFuture-based simulation.
+ * WORKSTREAM G (outbox pattern): OTP delivery now goes through
+ * outboxService.enqueue(...) (mocked here) instead of a direct
+ * SmsService call - a plain enqueue, not enqueueWithBusinessWrite, since
+ * there's no business write to pair atomically with at this point in
+ * registration (see RegistrationFlowService's class-level note).
  */
 @ExtendWith(MockitoExtension.class)
 class RegistrationFlowServiceTest {
@@ -50,7 +54,7 @@ class RegistrationFlowServiceTest {
     @Mock
     private WhatsAppMessageService messageService;
     @Mock
-    private SmsService smsService;
+    private OutboxService outboxService;
     @Mock
     private RegisteredUserRepository registeredUserRepository;
 
@@ -59,11 +63,13 @@ class RegistrationFlowServiceTest {
 
     @BeforeEach
     void setUp() {
-        FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
+                FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
         userStore = new RegisteredUserStore(registeredUserRepository);
         PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-        registrationFlowService = new RegistrationFlowService(screenService, messageService, smsService, userStore, passwordEncoder);
-            }
+        registrationFlowService = new RegistrationFlowService(screenService, messageService, outboxService, userStore, passwordEncoder);
+
+        lenient().when(outboxService.enqueue(any(), any())).thenReturn(new OutboxEntry());
+    }
 
     // ==================== ENTRY + OPT-IN ====================
 
@@ -122,13 +128,13 @@ class RegistrationFlowServiceTest {
         UserSession session = new UserSession();
 
         registrationFlowService.handleFirstName(FROM, "  ", session);
-
+        
         assertThat(session.getFirstName()).isNull();
         assertThat(session.getStep()).isEqualTo("welcome"); // unchanged
     }
 
     @Test
-        void validMiddleNameAdvancesToLastName() {
+    void validMiddleNameAdvancesToLastName() {
         UserSession session = new UserSession();
 
         registrationFlowService.handleMiddleName(FROM, "Wanjiru", session);
@@ -187,13 +193,13 @@ class RegistrationFlowServiceTest {
     }
 
     @Test
-    void validUpnAdvancesToNationalId() {
+        void validUpnAdvancesToNationalId() {
         UserSession session = new UserSession();
 
         registrationFlowService.handleUpnField(FROM, "12345", session);
 
         assertThat(session.getUpn()).isEqualTo("12345");
-                assertThat(session.getStep()).isEqualTo("national_id");
+        assertThat(session.getStep()).isEqualTo("national_id");
     }
 
     @Test
@@ -221,15 +227,20 @@ class RegistrationFlowServiceTest {
     // ==================== CONFIRM / EDIT ====================
 
     @Test
-    void confirmDetailsSendsOtpViaSmsAndMovesToOtpStep() {
+    void confirmDetailsSendsOtpViaTheOutboxAndMovesToOtpStep() {
         UserSession session = new UserSession();
 
         registrationFlowService.handleConfirmDetails(FROM, session);
 
         assertThat(session.getStep()).isEqualTo("enter_otp");
         assertThat(session.getOtp()).matches("^\\d{5}$");
-        // WORKSTREAM F: OTP delivery now goes through SmsService.
-        verify(smsService).sendSms(eq(FROM), contains(session.getOtp()));
+        // WORKSTREAM G: OTP delivery now goes through the outbox.
+        verify(outboxService).enqueue(
+                eq(OutboxEntryType.OTP_SMS),
+                argThat(payload -> payload instanceof OutboxPayloads.SmsPayload p
+                        && p.phoneNumber().equals(FROM)
+                        && p.message().contains(session.getOtp()))
+        );
         // WORKSTREAM E: OTP entry now goes through the Flow webview.
         verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
@@ -247,7 +258,7 @@ class RegistrationFlowServiceTest {
     @Test
     void editFieldSelectWorksForMiddleNameAndEmailAddressToo() {
         UserSession session = new UserSession();
-
+        
         registrationFlowService.handleEditFieldSelect(FROM, "edit_middlename", session);
         verify(messageService).sendTextMessage(FROM, "Enter new Middle Name:");
 
@@ -258,7 +269,7 @@ class RegistrationFlowServiceTest {
     @Test
     void editFieldTextUpdatesTheCorrectFieldAndReturnsToConfirmation() {
         UserSession session = new UserSession();
-                session.setStep("edit_firstname");
+        session.setStep("edit_firstname");
         session.setFirstName("OldName");
 
         registrationFlowService.handleEditFieldText(FROM, "NewName", session);
@@ -312,7 +323,7 @@ class RegistrationFlowServiceTest {
     // ==================== OTP ====================
 
     @Test
-    void correctOtpAdvancesToNewPinStep() {
+        void correctOtpAdvancesToNewPinStep() {
         UserSession session = new UserSession();
         session.setOtp("12345");
 
@@ -323,7 +334,7 @@ class RegistrationFlowServiceTest {
     }
 
     @Test
-        void wrongOtpIncrementsAttempts() {
+    void wrongOtpIncrementsAttempts() {
         UserSession session = new UserSession();
         session.setOtp("12345");
 
@@ -377,7 +388,7 @@ class RegistrationFlowServiceTest {
 
     @Test
     void mismatchedPinConfirmationSendsBackToEnterNewPin() {
-        UserSession session = new UserSession();
+                UserSession session = new UserSession();
         session.setNewPin("99999");
 
         registrationFlowService.handleConfirmNewPin(FROM, "11111", session);
@@ -387,7 +398,8 @@ class RegistrationFlowServiceTest {
         // happens securely, not by falling back to typing in chat.
         verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
-        @Test
+
+    @Test
     void matchingPinConfirmationCompletesRegistration() {
         UserSession session = new UserSession();
         session.setFirstName("Jane");
