@@ -23,6 +23,20 @@ import java.util.Optional;
  * "enter your M-Pesa PIN" message at all (only PayslipFlowService and
  * LoanDocumentFlowService did), so payments here went straight to the
  * result message with no STK push explanation in between.
+ *
+ * PERSISTENCE FIX (regression from WORKSTREAM C): loanStore.findByPhoneNumber()
+ * returns a detached entity (Postgres-backed now, not the old in-memory
+ * map that handed back the same live object every time), so mutating the
+ * returned Loan alone never persisted anything. Before this fix,
+ * handleConfirmPayLoan updated installmentsPaid/status only in memory:
+ * payments never stuck, the loan could never reach "paid" (so no Loan
+ * Clearance Letter was ever possible), and the paymentInProgress
+ * double-tap guard was ineffective since every call loaded a fresh copy
+ * where the flag was false. Now the guard is saved immediately, released
+ * if the STK push throws, and the final state saved once at the end. A
+ * residual race remains for two truly simultaneous requests (check-then-
+ * write isn't atomic); closing that fully would need optimistic locking
+ * (@Version) on Loan, which is a possible later hardening step.
  */
 @Service
 public class LoanPaymentFlowService {
@@ -49,7 +63,7 @@ public class LoanPaymentFlowService {
     public void handlePayLoanMenu(String to, UserSession session) {
         Optional<Loan> loanOpt = loanStore.findByPhoneNumber(to);
         if (loanOpt.isEmpty() || !"approved".equals(loanOpt.get().getStatus())) {
-            screenService.sendMainMenu(to);
+                        screenService.sendMainMenu(to);
             return;
         }
 
@@ -103,22 +117,40 @@ public class LoanPaymentFlowService {
         if (loan.isPaymentInProgress()) {
             return;
         }
+        // Persist the guard immediately: a duplicate tap that loads this
+        // loan while the payment below is still running now genuinely
+        // sees paymentInProgress=true, instead of a fresh detached copy
+        // where it's always false.
         loan.setPaymentInProgress(true);
+        loanStore.save(to, loan);
 
         int installments = session.getPendingPaymentInstallments();
         int monthlyInstallment = loan.getBreakdown() != null ? loan.getBreakdown().installmentPerMonth() : 14442;
         int payAmount = monthlyInstallment * installments;
-
-        mpesaService.initiateStkPush(to, payAmount, "loan_payment");
+                try {
+            mpesaService.initiateStkPush(to, payAmount, "loan_payment");
+        } catch (RuntimeException err) {
+            // Release the guard so a single failed STK push can't leave
+            // paymentInProgress stuck at true and block this person's
+            // payments permanently.
+            loan.setPaymentInProgress(false);
+            loanStore.save(to, loan);
+            throw err;
+        }
 
         loan.setInstallmentsPaid(loan.getInstallmentsPaid() + installments);
         session.setPendingPaymentInstallments(null);
         loan.setPaymentInProgress(false);
 
         boolean fullyPaid = loan.getInstallmentsPaid() >= loan.getTenureMonths();
-
         if (fullyPaid) {
             loan.setStatus("paid");
+        }
+        // One save persists everything together: the new installment
+        // count, the paid status if applicable, and the cleared guard.
+        loanStore.save(to, loan);
+
+        if (fullyPaid) {
             log.info("loan_fully_paid to={} refNo={}", to, loan.getRefNo());
             String message = String.format(
                     "Your installment of KES %,d Ref: %s has been paid. Your loan has been fully paid. Thank you for using MyMobi services.",
