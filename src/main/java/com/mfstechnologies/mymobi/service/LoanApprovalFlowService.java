@@ -18,6 +18,16 @@ import java.util.Optional;
  * WORKSTREAM B (reactive -> synchronous): every method here used to
  * return Mono<Void>, chaining follow-up screens with .then(). All
  * converted to plain blocking void methods with sequential statements.
+ *
+ * PERSISTENCE FIX (regression from WORKSTREAM C): loanStore.findByPhoneNumber()
+ * returns a detached entity (it's Postgres-backed now, not the old
+ * in-memory map that handed back the same live object every time), so
+ * mutating the returned Loan alone never persisted anything. Before this
+ * fix, approving a loan never stuck (the status stayed pending_approval
+ * in the database, so Main Menu kept offering Approve Loan), and the
+ * failed-attempt counters never accumulated, so the 3-attempt lockout
+ * could never actually trigger. Every mutation here is now followed by an
+ * explicit loanStore.save(...).
  */
 @Service
 public class LoanApprovalFlowService {
@@ -53,7 +63,7 @@ public class LoanApprovalFlowService {
 
         screenService.sendApproveLoanDetails(to, loan.get());
     }
-
+    
     public void handleEnterApprovalCodeMenu(String to, UserSession session) {
         session.setStep("enter_approval_code");
         screenService.sendCodeEntryFlow(to, "Enter Approval Code:", "Enter Code");
@@ -106,6 +116,7 @@ public class LoanApprovalFlowService {
 
         loan.setStatus("approved");
         loan.setApprovedAt(Instant.now());
+        loanStore.save(to, loan);
         session.setStep("welcome");
 
         log.info("loan_approved to={} refNo={}", to, loan.getRefNo());
@@ -117,7 +128,7 @@ public class LoanApprovalFlowService {
         messageService.sendTextMessage(to, message);
         screenService.sendHomeScreen(to, session);
     }
-
+    
     private void recordFailedApprovalAttempt(String to, UserSession session, Loan loan, boolean isCodeAttempt) {
         int attempts;
         if (isCodeAttempt) {
@@ -135,6 +146,11 @@ public class LoanApprovalFlowService {
             screenService.sendHomeScreen(to, session);
             return;
         }
+
+        // Persist the incremented counter so it actually accumulates
+        // across messages - without this, every attempt started from 0
+        // again and the lockout above could never trigger.
+        loanStore.save(to, loan);
 
         int attemptsLeft = MAX_APPROVAL_ATTEMPTS - attempts;
         String what = isCodeAttempt ? "Approval Code" : "Payroll Number";
