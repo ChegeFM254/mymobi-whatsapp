@@ -10,10 +10,12 @@ import com.mfstechnologies.mymobi.testsupport.FakeRepositories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -29,10 +31,20 @@ import static org.mockito.Mockito.*;
  *
  * WORKSTREAM F (mock service abstraction layer): the inline M-Pesa STK
  * push simulation is now delegated to MpesaService (mocked here) -
- * confirmingAPartialPaymentUpdatesInstallmentsAndStaysApproved and
- * confirmingTheFinalPaymentMarksTheLoanAsPaid both now verify the call
- * directly, since this flow previously never sent any STK push message
- * at all.
+ * confirmingAPartialPaymentUpdatesAndPersistsInstallmentsAndStaysApproved
+ * and confirmingTheFinalPaymentMarksAndPersistsTheLoanAsPaid both verify
+ * the call directly, since this flow previously never sent any STK push
+ * message at all.
+ *
+ * PERSISTENCE FIX: these tests used to assert only on the in-memory
+ * state of the same Loan object the test itself created, which could
+ * never have caught a missing loanStore.save(...) call - FakeRepositories'
+ * backing HashMap stores and returns that very same Java object
+ * reference, whereas a real database hands back a fresh detached copy on
+ * every read. Every test expecting a change to stick now also verifies
+ * loanRepository.save(...), after clearInvocations(...) wipes the
+ * setup's own save() from the history (otherwise that earlier call alone
+ * would satisfy the verification).
  */
 @ExtendWith(MockitoExtension.class)
 class LoanPaymentFlowServiceTest {
@@ -50,8 +62,7 @@ class LoanPaymentFlowServiceTest {
 
     private LoanStore loanStore;
     private LoanPaymentFlowService paymentFlow;
-
-    @BeforeEach
+        @BeforeEach
     void setUp() {
         FakeRepositories.wireAsInMemoryStore(loanRepository, Loan::getPhoneNumber);
         loanStore = new LoanStore(loanRepository);
@@ -115,30 +126,54 @@ class LoanPaymentFlowServiceTest {
 
         assertThat(session.getPendingPaymentInstallments()).isNull();
     }
-
-    // ==================== CONFIRM PAYMENT ====================
+        // ==================== CONFIRM PAYMENT ====================
 
     @Test
-    void confirmingAPartialPaymentUpdatesInstallmentsAndStaysApproved() {
+    void confirmingAPartialPaymentUpdatesAndPersistsInstallmentsAndStaysApproved() {
         Loan loan = approvedLoan(3, 0);
         loanStore.save(FROM, loan);
+        clearInvocations(loanRepository);
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(1);
 
         paymentFlow.handleConfirmPayLoan(FROM, session);
 
         assertThat(loan.getInstallmentsPaid()).isEqualTo(1);
-                assertThat(loan.getStatus()).isEqualTo("approved");
+        assertThat(loan.getStatus()).isEqualTo("approved");
+        assertThat(loan.isPaymentInProgress()).isFalse();
         assertThat(session.getPendingPaymentInstallments()).isNull();
+        // PERSISTENCE FIX: saved twice - once to persist the in-progress
+        // guard before the STK push, once for the final state afterward.
+        verify(loanRepository, times(2)).save(loan);
         verify(mpesaService).initiateStkPush(FROM, 14442, "loan_payment");
         verify(messageService).sendTextMessage(eq(FROM),
                 eq("Your installment of KES 14,442 Ref: MVCAGHD1 has been paid. You have a loan balance of KES 28,884. Thank you for using MyMobi services."));
     }
 
     @Test
-    void confirmingTheFinalPaymentMarksTheLoanAsPaid() {
+    void theGuardIsPersistedBeforeTheStkPushAndTheFinalStateAfterIt() {
+        Loan loan = approvedLoan(3, 0);
+        loanStore.save(FROM, loan);
+        clearInvocations(loanRepository);
+        UserSession session = new UserSession();
+        session.setPendingPaymentInstallments(1);
+
+        paymentFlow.handleConfirmPayLoan(FROM, session);
+
+        // The ordering is the whole point of the guard: it only protects
+        // against a duplicate tap if it's already saved by the time the
+        // (potentially slow) STK push is underway.
+        InOrder inOrder = inOrder(loanRepository, mpesaService);
+        inOrder.verify(loanRepository).save(loan);
+        inOrder.verify(mpesaService).initiateStkPush(FROM, 14442, "loan_payment");
+        inOrder.verify(loanRepository).save(loan);
+    }
+
+    @Test
+    void confirmingTheFinalPaymentMarksAndPersistsTheLoanAsPaid() {
         Loan loan = approvedLoan(3, 2); // 1 remaining
         loanStore.save(FROM, loan);
+        clearInvocations(loanRepository);
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(1);
 
@@ -146,13 +181,17 @@ class LoanPaymentFlowServiceTest {
 
         assertThat(loan.getInstallmentsPaid()).isEqualTo(3);
         assertThat(loan.getStatus()).isEqualTo("paid");
+        // PERSISTENCE FIX: without these saves the loan never reached
+        // "paid" in the database, so a Loan Clearance Letter could never
+        // be generated.
+        verify(loanRepository, times(2)).save(loan);
         verify(mpesaService).initiateStkPush(FROM, 14442, "loan_payment");
         verify(messageService).sendTextMessage(eq(FROM),
                 eq("Your installment of KES 14,442 Ref: MVCAGHD1 has been paid. Your loan has been fully paid. Thank you for using MyMobi services."));
         verify(screenService).sendHomeScreen(FROM, session);
         verify(screenService, never()).sendWelcome(anyString());
     }
-
+    
     @Test
     void payingTwoInstallmentsAtOnceShowsTheCorrectAmountAndRemainingBalance() {
         Loan loan = approvedLoan(3, 0);
@@ -169,10 +208,34 @@ class LoanPaymentFlowServiceTest {
     }
 
     @Test
+    void aFailedStkPushReleasesTheGuardAndLeavesInstallmentsUntouched() {
+        Loan loan = approvedLoan(3, 0);
+        loanStore.save(FROM, loan);
+        clearInvocations(loanRepository);
+        UserSession session = new UserSession();
+        session.setPendingPaymentInstallments(1);
+        doThrow(new RuntimeException("stk failed")).when(mpesaService).initiateStkPush(anyString(), anyDouble(), anyString());
+
+        assertThatThrownBy(() -> paymentFlow.handleConfirmPayLoan(FROM, session))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("stk failed");
+
+        // Without releasing the guard, one failed STK push would leave
+        // paymentInProgress stuck at true and block every future payment
+        // attempt for this person permanently.
+        assertThat(loan.isPaymentInProgress()).isFalse();
+        assertThat(loan.getInstallmentsPaid()).isZero();
+        assertThat(loan.getStatus()).isEqualTo("approved");
+        verify(loanRepository, times(2)).save(loan); // guard set, then guard released
+        verifyNoInteractions(messageService);
+    }
+
+    @Test
     void paymentInProgressGuardPreventsADoubleTapFromPayingTwice() {
         Loan loan = approvedLoan(3, 0);
         loan.setPaymentInProgress(true); // simulate a payment already underway
         loanStore.save(FROM, loan);
+        clearInvocations(loanRepository);
         UserSession session = new UserSession();
         session.setPendingPaymentInstallments(1);
 
@@ -181,6 +244,7 @@ class LoanPaymentFlowServiceTest {
         assertThat(loan.getInstallmentsPaid()).isZero(); // unaffected by the second tap
         verifyNoInteractions(messageService);
         verifyNoInteractions(mpesaService);
+        verify(loanRepository, never()).save(any());
     }
 
     // ==================== CANCEL ====================
@@ -195,4 +259,3 @@ class LoanPaymentFlowServiceTest {
         assertThat(session.getPendingPaymentInstallments()).isNull();
     }
 }
-        
