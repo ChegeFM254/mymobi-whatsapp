@@ -1,5 +1,7 @@
 package com.mfstechnologies.mymobi.service;
 
+import com.mfstechnologies.mymobi.model.OutboxEntry;
+import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.RegisteredUser;
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
@@ -15,9 +17,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.contains;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
@@ -41,9 +41,20 @@ import static org.mockito.Mockito.*;
  * must re-send the Flow so the person never has to fall back to typing
  * the value directly into the chat.
  *
- * WORKSTREAM F (mock service abstraction layer): OTP delivery now goes
- * through smsService.sendSms(...) (mocked here) instead of an inline
- * CompletableFuture-based simulation.
+ * WORKSTREAM G (outbox pattern): OTP delivery now goes through
+ * outboxService.enqueue(...) (mocked here) instead of a direct
+ * SmsService call - a plain enqueue, since nothing is persisted yet at
+ * this point in the flow (see ForgotPinFlowService's class-level note).
+ *
+ * matchingConfirmationUpdatesTheExistingAccountsPin now also verifies
+ * registeredUserRepository.save(...) is actually called - this test
+ * previously passed even when handleConfirmNewPin was missing its
+ * userStore.save() call entirely (a genuine bug, fixed alongside this
+ * workstream), because FakeRepositories' backing HashMap stores the same
+ * Java object reference rather than a true copy the way a real database
+ * would - so checking only the in-memory field value after the call
+ * could never have caught a missing persistence call. The explicit
+ * verify(...).save(...) now makes that failure mode actually testable.
  */
 @ExtendWith(MockitoExtension.class)
 class ForgotPinFlowServiceTest {
@@ -52,10 +63,10 @@ class ForgotPinFlowServiceTest {
 
     @Mock
     private ScreenMessageService screenService;
-    @Mock
+        @Mock
     private WhatsAppMessageService messageService;
     @Mock
-    private SmsService smsService;
+    private OutboxService outboxService;
     @Mock
     private RegisteredUserRepository registeredUserRepository;
 
@@ -63,13 +74,15 @@ class ForgotPinFlowServiceTest {
     private LoginLockoutService lockoutService;
     private ForgotPinFlowService forgotPinFlowService;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-    
+
     @BeforeEach
     void setUp() {
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
         userStore = new RegisteredUserStore(registeredUserRepository);
         lockoutService = new LoginLockoutService(600);
-        forgotPinFlowService = new ForgotPinFlowService(screenService, messageService, smsService, userStore, passwordEncoder, lockoutService);
+        forgotPinFlowService = new ForgotPinFlowService(screenService, messageService, outboxService, userStore, passwordEncoder, lockoutService);
+
+        lenient().when(outboxService.enqueue(any(), any())).thenReturn(new OutboxEntry());
     }
 
     @Test
@@ -93,7 +106,7 @@ class ForgotPinFlowServiceTest {
     }
 
     @Test
-    void existingAccountGetsAnOtpSentViaSmsAndMovesToOtpStep() {
+    void existingAccountGetsAnOtpSentViaTheOutboxAndMovesToOtpStep() {
         userStore.save(FROM, new RegisteredUser());
         UserSession session = new UserSession();
 
@@ -101,8 +114,13 @@ class ForgotPinFlowServiceTest {
 
         assertThat(session.getStep()).isEqualTo("forgot_pin_enter_otp");
         assertThat(session.getOtp()).matches("^\\d{5}$");
-        // WORKSTREAM F: OTP delivery now goes through SmsService.
-        verify(smsService).sendSms(eq(FROM), contains(session.getOtp()));
+        // WORKSTREAM G: OTP delivery now goes through the outbox.
+        verify(outboxService).enqueue(
+                eq(OutboxEntryType.OTP_SMS),
+                argThat(payload -> payload instanceof OutboxPayloads.SmsPayload p
+                        && p.phoneNumber().equals(FROM)
+                        && p.message().contains(session.getOtp()))
+        );
         // WORKSTREAM E: OTP entry now goes through the Flow webview.
         verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
@@ -110,7 +128,7 @@ class ForgotPinFlowServiceTest {
     @Test
     void correctOtpAdvancesToNewPinStep() {
         UserSession session = new UserSession();
-        session.setOtp("12345");
+                session.setOtp("12345");
 
         forgotPinFlowService.handleEnterOtp(FROM, "12345", session);
 
@@ -128,7 +146,7 @@ class ForgotPinFlowServiceTest {
         assertThat(session.getOtpAttempts()).isEqualTo(1);
         verify(messageService).sendTextMessage(eq(FROM), contains("2 attempt(s) remaining"));
         // WORKSTREAM E: the Flow must be re-sent so the retry also
-            // happens securely, not by falling back to typing in chat.
+        // happens securely, not by falling back to typing in chat.
         verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
@@ -163,17 +181,27 @@ class ForgotPinFlowServiceTest {
         RegisteredUser existing = new RegisteredUser();
         existing.setHashedPin(passwordEncoder.encode("11111"));
         userStore.save(FROM, existing);
+        // Clears the repository's invocation history, which already
+        // includes one save() from the setup line above - without this,
+        // verify(...).save(...) below would pass even if
+        // handleConfirmNewPin never saved anything itself, since "at
+        // least once" would already be satisfied by that earlier call.
+        clearInvocations(registeredUserRepository);
 
         UserSession session = new UserSession();
         session.setNewPin("99999");
 
         forgotPinFlowService.handleConfirmNewPin(FROM, "99999", session);
-
-        RegisteredUser updated = userStore.findByPhoneNumber(FROM).get();
+                RegisteredUser updated = userStore.findByPhoneNumber(FROM).get();
         assertThat(passwordEncoder.matches("11111", updated.getHashedPin())).isFalse();
         assertThat(passwordEncoder.matches("99999", updated.getHashedPin())).isTrue();
         assertThat(session.isAuthenticated()).isTrue();
         verify(screenService).sendMainMenu(FROM);
+        // WORKSTREAM G (bug fix, unrelated to the outbox itself): confirms
+        // the new PIN is genuinely persisted, not just mutated in memory -
+        // see class-level note on why the assertions above alone
+        // wouldn't have caught this bug.
+        verify(registeredUserRepository).save(updated);
     }
 
     @Test
