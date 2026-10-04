@@ -30,6 +30,17 @@ import static org.mockito.Mockito.*;
  * repositories (see FakeRepositories) so they keep behaving like real,
  * working collaborators, exactly as they did with the old
  * ConcurrentHashMap.
+ *
+ * PERSISTENCE FIX: these tests used to assert only on the in-memory
+ * state of the same Loan object the test itself created. That could
+ * never have caught a missing loanStore.save(...) call, because
+ * FakeRepositories' backing HashMap stores and returns that very same
+ * Java object reference - a real database hands back a fresh, detached
+ * copy on every read, where mutating it without saving loses the
+ * change. So every test that expects a mutation to stick now also
+ * verifies loanRepository.save(...) was genuinely called, after
+ * clearInvocations(...) wipes the setup's own save() from the history
+ * (otherwise that earlier call alone would satisfy the verification).
  */
 @ExtendWith(MockitoExtension.class)
 class LoanApprovalFlowServiceTest {
@@ -52,7 +63,7 @@ class LoanApprovalFlowServiceTest {
     @BeforeEach
     void setUp() {
         FakeRepositories.wireAsInMemoryStore(loanRepository, Loan::getPhoneNumber);
-        loanStore = new LoanStore(loanRepository);
+                loanStore = new LoanStore(loanRepository);
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
         userStore = new RegisteredUserStore(registeredUserRepository);
         approvalFlow = new LoanApprovalFlowService(screenService, messageService, loanStore, userStore);
@@ -105,41 +116,49 @@ class LoanApprovalFlowServiceTest {
     }
 
     @Test
-       void wrongApprovalCodeIncrementsAttemptsOnTheLoanItself() {
+    void wrongApprovalCodeIncrementsAndPersistsTheAttemptCounter() {
         Loan loan = pendingLoan();
         loanStore.save(FROM, loan);
+        clearInvocations(loanRepository);
         UserSession session = new UserSession();
 
         approvalFlow.handleEnterApprovalCode(FROM, "000000", session);
 
         assertThat(loan.getApprovalCodeAttempts()).isEqualTo(1);
         assertThat(session.getStep()).isNotEqualTo("approval_payroll_number");
+        // PERSISTENCE FIX: the incremented counter must actually be saved,
+        // or the 3-attempt lockout can never accumulate across messages.
+            verify(loanRepository).save(loan);
         // WORKSTREAM E: the Flow must be re-sent so the retry also
         // happens securely, not by falling back to typing in chat.
-                verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
+        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
     }
 
     @Test
-    void thirdWrongApprovalCodeCancelsTheLoan() {
+    void thirdWrongApprovalCodeCancelsTheLoanWithoutAnUnnecessarySave() {
         Loan loan = pendingLoan();
         loan.setApprovalCodeAttempts(2);
         loanStore.save(FROM, loan);
+        clearInvocations(loanRepository);
         UserSession session = new UserSession();
 
         approvalFlow.handleEnterApprovalCode(FROM, "000000", session);
 
         assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
+        verify(loanRepository).deleteById(FROM);
+        verify(loanRepository, never()).save(any());
     }
 
     // ==================== APPROVAL PAYROLL NUMBER ====================
 
     @Test
-    void matchingPayrollNumberApprovesTheLoan() {
+    void matchingPayrollNumberApprovesAndPersistsTheLoan() {
         Loan loan = pendingLoan();
         loanStore.save(FROM, loan);
         RegisteredUser user = new RegisteredUser();
         user.setUpn("19999999");
         userStore.save(FROM, user);
+        clearInvocations(loanRepository);
 
         UserSession session = new UserSession();
 
@@ -147,17 +166,22 @@ class LoanApprovalFlowServiceTest {
 
         assertThat(loan.getStatus()).isEqualTo("approved");
         assertThat(loan.getApprovedAt()).isNotNull();
+        // PERSISTENCE FIX: without this save, approving never stuck - the
+        // database kept pending_approval and Main Menu kept offering
+        // Approve Loan.
+        verify(loanRepository).save(loan);
         verify(screenService).sendHomeScreen(FROM, session);
         verify(screenService, never()).sendWelcome(anyString());
     }
 
     @Test
-    void nonMatchingPayrollNumberIncrementsSeparateAttemptCounter() {
+    void nonMatchingPayrollNumberIncrementsAndPersistsASeparateAttemptCounter() {
         Loan loan = pendingLoan();
         loanStore.save(FROM, loan);
         RegisteredUser user = new RegisteredUser();
         user.setUpn("19999999");
         userStore.save(FROM, user);
+        clearInvocations(loanRepository);
 
         UserSession session = new UserSession();
 
@@ -166,6 +190,25 @@ class LoanApprovalFlowServiceTest {
         assertThat(loan.getApprovalPayrollAttempts()).isEqualTo(1);
         assertThat(loan.getApprovalCodeAttempts()).isZero();
         assertThat(loan.getStatus()).isEqualTo("pending_approval");
+        verify(loanRepository).save(loan);
+    }
+        @Test
+    void thirdWrongPayrollNumberCancelsTheLoanWithoutAnUnnecessarySave() {
+        Loan loan = pendingLoan();
+        loan.setApprovalPayrollAttempts(2);
+        loanStore.save(FROM, loan);
+        RegisteredUser user = new RegisteredUser();
+        user.setUpn("19999999");
+        userStore.save(FROM, user);
+        clearInvocations(loanRepository);
+
+        UserSession session = new UserSession();
+
+        approvalFlow.handleApprovalPayrollNumber(FROM, "10000000", session);
+
+        assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
+        verify(loanRepository).deleteById(FROM);
+        verify(loanRepository, never()).save(any());
     }
 
     // ==================== CANCEL LOAN ====================
