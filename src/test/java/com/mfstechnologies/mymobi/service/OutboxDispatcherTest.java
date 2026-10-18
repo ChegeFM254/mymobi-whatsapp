@@ -22,12 +22,20 @@ import static org.mockito.Mockito.*;
 
 /**
  * WORKSTREAM G (outbox pattern): covers processEntry()'s three outcomes
- * (success, retry, exhaustion) and dispatchPendingEntries()'s role as a
- * thin loop over whatever the repository says is due. repository.save()
- * is verified for the resulting entry state in each case, since that's
- * the actual persisted outcome - OutboxRepository is mocked directly
- * (not via FakeRepositories) for the same auto-generated-id reason as
+ * (success, retry, exhaustion), the dispatching of every entry type,
+ * and dispatchPendingEntries()'s role as a thin loop over whatever the
+ * repository says is due (oldest first). repository.save() is verified
+ * for the resulting entry state in each case, since that's the actual
+ * persisted outcome - OutboxRepository is mocked directly (not via
+ * FakeRepositories) for the same auto-generated-id reason as
  * OutboxServiceTest.
+ *
+ * everyOutboxEntryTypeHasDispatcherHandling guards against a new
+ * OutboxEntryType being added without dispatcher handling: such an
+ * entry would otherwise reach the dispatcher's default branch and fail.
+ * samplePayloadFor() is a switch expression, so adding an enum constant
+ * without adding a sample payload here is a compile error - the gap
+ * can't be missed.
  */
 @ExtendWith(MockitoExtension.class)
 class OutboxDispatcherTest {
@@ -40,18 +48,22 @@ class OutboxDispatcherTest {
     private SmsService smsService;
     @Mock
     private MpesaService mpesaService;
+    @Mock
+    private LoanService loanService;
+    @Mock
+    private CustomerService customerService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private OutboxDispatcher dispatcher;
 
     @BeforeEach
     void setUp() {
-        dispatcher = new OutboxDispatcher(repository, smsService, mpesaService, objectMapper);
+        dispatcher = new OutboxDispatcher(repository, smsService, mpesaService, loanService, customerService, objectMapper);
     }
 
     private OutboxEntry pendingEntry(OutboxEntryType type, Object payload, int attempts, int maxAttempts) {
         OutboxEntry entry = new OutboxEntry();
-        entry.setId(UUID.randomUUID());
+                entry.setId(UUID.randomUUID());
         entry.setType(type);
         entry.setPayload(objectMapper.writeValueAsString(payload));
         entry.setStatus(OutboxStatus.PENDING);
@@ -60,6 +72,19 @@ class OutboxDispatcherTest {
         entry.setNextAttemptAt(Instant.now());
         entry.setCreatedAt(Instant.now());
         return entry;
+    }
+
+    private static Object samplePayloadFor(OutboxEntryType type) {
+        return switch (type) {
+            case OTP_SMS -> new OutboxPayloads.SmsPayload(PHONE, "OTP 12345");
+            case APPROVAL_CODE_SMS -> new OutboxPayloads.ApprovalCodeSmsPayload(PHONE, "Approval Code 654321", "REF1");
+            case MPESA_STK_PUSH -> new OutboxPayloads.StkPushPayload(PHONE, 100.0, "loan_payment");
+            case LOAN_APPLICATION_SUBMIT -> new LoanService.ApplicationRequest(PHONE, "REF1", 15000, 1, "19999999", "2026-11-04");
+            case LOAN_APPROVAL -> new LoanService.ApprovalRequest(PHONE, "REF1", 13487);
+            case LOAN_REPAYMENT_RECORD -> new LoanService.RepaymentRequest(PHONE, "REF1", 1, 16200);
+            case CUSTOMER_CREATE -> new CustomerService.CreateRequest(PHONE, "Jane", "Wanjiru", "Doe", "jane@example.com", "12345", "87654321", PHONE, "$2a$hash");
+            case CUSTOMER_PIN_RESET -> new CustomerService.PinResetRequest(PHONE, "$2a$hash");
+        };
     }
 
     // ==================== processEntry: success ====================
@@ -102,6 +127,81 @@ class OutboxDispatcherTest {
         verify(smsService).sendSms(PHONE, "Approval Code 654321");
         assertThat(entry.getStatus()).isEqualTo(OutboxStatus.COMPLETED);
     }
+        // ==================== processEntry: backend requests ====================
+
+    @Test
+    void loanApplicationDispatchCallsLoanServiceWithTheEntryIdAsTheRequestId() {
+        var request = new LoanService.ApplicationRequest(PHONE, "REF1", 15000, 1, "19999999", "2026-11-04");
+        OutboxEntry entry = pendingEntry(OutboxEntryType.LOAN_APPLICATION_SUBMIT, request, 0, 8);
+        when(repository.findById(entry.getId())).thenReturn(Optional.of(entry));
+
+        dispatcher.processEntry(entry.getId());
+
+        verify(loanService).submitApplication(entry.getId(), request);
+        assertThat(entry.getStatus()).isEqualTo(OutboxStatus.COMPLETED);
+    }
+
+    @Test
+    void loanApprovalDispatchCallsLoanServiceWithTheEntryIdAsTheRequestId() {
+        var request = new LoanService.ApprovalRequest(PHONE, "REF1", 13487);
+        OutboxEntry entry = pendingEntry(OutboxEntryType.LOAN_APPROVAL, request, 0, 8);
+        when(repository.findById(entry.getId())).thenReturn(Optional.of(entry));
+
+        dispatcher.processEntry(entry.getId());
+
+        verify(loanService).approveLoan(entry.getId(), request);
+        assertThat(entry.getStatus()).isEqualTo(OutboxStatus.COMPLETED);
+    }
+
+    @Test
+    void loanRepaymentDispatchCallsLoanServiceWithTheEntryIdAsTheRequestId() {
+        var request = new LoanService.RepaymentRequest(PHONE, "REF1", 2, 32400);
+        OutboxEntry entry = pendingEntry(OutboxEntryType.LOAN_REPAYMENT_RECORD, request, 0, 8);
+        when(repository.findById(entry.getId())).thenReturn(Optional.of(entry));
+
+        dispatcher.processEntry(entry.getId());
+
+        verify(loanService).recordRepayment(entry.getId(), request);
+        assertThat(entry.getStatus()).isEqualTo(OutboxStatus.COMPLETED);
+    }
+
+    @Test
+    void customerCreateDispatchCallsCustomerServiceWithTheEntryIdAsTheRequestId() {
+        var request = new CustomerService.CreateRequest(PHONE, "Jane", "Wanjiru", "Doe", "jane@example.com", "12345", "87654321", PHONE, "$2a$hash");
+        OutboxEntry entry = pendingEntry(OutboxEntryType.CUSTOMER_CREATE, request, 0, 8);
+        when(repository.findById(entry.getId())).thenReturn(Optional.of(entry));
+
+        dispatcher.processEntry(entry.getId());
+
+        verify(customerService).createCustomer(entry.getId(), request);
+        assertThat(entry.getStatus()).isEqualTo(OutboxStatus.COMPLETED);
+    }
+
+    @Test
+    void pinResetDispatchCallsCustomerServiceWithTheEntryIdAsTheRequestId() {
+        var request = new CustomerService.PinResetRequest(PHONE, "$2a$hash");
+        OutboxEntry entry = pendingEntry(OutboxEntryType.CUSTOMER_PIN_RESET, request, 0, 8);
+        when(repository.findById(entry.getId())).thenReturn(Optional.of(entry));
+
+        dispatcher.processEntry(entry.getId());
+
+        verify(customerService).resetPin(entry.getId(), request);
+        assertThat(entry.getStatus()).isEqualTo(OutboxStatus.COMPLETED);
+    }
+
+    @Test
+    void everyOutboxEntryTypeHasDispatcherHandling() {
+        for (OutboxEntryType type : OutboxEntryType.values()) {
+                        OutboxEntry entry = pendingEntry(type, samplePayloadFor(type), 0, 3);
+            when(repository.findById(entry.getId())).thenReturn(Optional.of(entry));
+
+            dispatcher.processEntry(entry.getId());
+
+            assertThat(entry.getStatus())
+                    .as("status after dispatching %s", type)
+                    .isEqualTo(OutboxStatus.COMPLETED);
+        }
+    }
 
     // ==================== processEntry: failure with attempts remaining ====================
 
@@ -123,12 +223,29 @@ class OutboxDispatcherTest {
     }
 
     @Test
+    void aFailingBackendCallIsRetriedUsingTheBackendRequestBackoff() {
+        var request = new CustomerService.PinResetRequest(PHONE, "$2a$hash");
+        OutboxEntry entry = pendingEntry(OutboxEntryType.CUSTOMER_PIN_RESET, request, 0, 8);
+        when(repository.findById(entry.getId())).thenReturn(Optional.of(entry));
+        doThrow(new IllegalStateException("backend down")).when(customerService).resetPin(any(), any());
+
+        Instant before = Instant.now();
+        dispatcher.processEntry(entry.getId());
+
+        assertThat(entry.getStatus()).isEqualTo(OutboxStatus.PENDING);
+        assertThat(entry.getAttempts()).isEqualTo(1);
+        assertThat(entry.getLastError()).contains("backend down");
+        // The first backoff for backend requests is 15 seconds.
+        assertThat(entry.getNextAttemptAt()).isAfterOrEqualTo(before.plusSeconds(14));
+    }
+
+    @Test
     void laterAttemptsBackOffFurtherThanEarlierOnes() {
         var payload = new OutboxPayloads.SmsPayload(PHONE, "OTP 12345");
         doThrow(new RuntimeException("down")).when(smsService).sendSms(anyString(), anyString());
 
         OutboxEntry firstFailure = pendingEntry(OutboxEntryType.OTP_SMS, payload, 0, 5);
-              when(repository.findById(firstFailure.getId())).thenReturn(Optional.of(firstFailure));
+        when(repository.findById(firstFailure.getId())).thenReturn(Optional.of(firstFailure));
         Instant beforeFirst = Instant.now();
         dispatcher.processEntry(firstFailure.getId());
         long firstDelaySeconds = firstFailure.getNextAttemptAt().getEpochSecond() - beforeFirst.getEpochSecond();
@@ -140,7 +257,7 @@ class OutboxDispatcherTest {
         long thirdDelaySeconds = thirdFailure.getNextAttemptAt().getEpochSecond() - beforeThird.getEpochSecond();
 
         assertThat(thirdDelaySeconds).isGreaterThan(firstDelaySeconds);
-    }
+            }
 
     // ==================== processEntry: exhaustion ====================
 
@@ -171,6 +288,8 @@ class OutboxDispatcherTest {
 
         verifyNoInteractions(smsService);
         verifyNoInteractions(mpesaService);
+        verifyNoInteractions(loanService);
+        verifyNoInteractions(customerService);
         verify(repository, never()).save(any());
     }
 
@@ -183,6 +302,8 @@ class OutboxDispatcherTest {
 
         verifyNoInteractions(smsService);
         verifyNoInteractions(mpesaService);
+        verifyNoInteractions(loanService);
+        verifyNoInteractions(customerService);
     }
 
     // ==================== dispatchPendingEntries: the poll loop ====================
@@ -193,15 +314,14 @@ class OutboxDispatcherTest {
         var payload2 = new OutboxPayloads.SmsPayload("254700000002", "OTP 22222");
         OutboxEntry entry1 = pendingEntry(OutboxEntryType.OTP_SMS, payload1, 0, 3);
         OutboxEntry entry2 = pendingEntry(OutboxEntryType.OTP_SMS, payload2, 0, 3);
-      
-        when(repository.findByStatusAndNextAttemptAtLessThanEqual(eq(OutboxStatus.PENDING), any(Instant.class)))
+
+        when(repository.findByStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(eq(OutboxStatus.PENDING), any(Instant.class)))
                 .thenReturn(List.of(entry1, entry2));
         when(repository.findById(entry1.getId())).thenReturn(Optional.of(entry1));
         when(repository.findById(entry2.getId())).thenReturn(Optional.of(entry2));
 
         dispatcher.dispatchPendingEntries();
-
-        verify(smsService).sendSms(PHONE, "OTP 11111");
+                verify(smsService).sendSms(PHONE, "OTP 11111");
         verify(smsService).sendSms("254700000002", "OTP 22222");
     }
 
@@ -212,7 +332,7 @@ class OutboxDispatcherTest {
         OutboxEntry entry1 = pendingEntry(OutboxEntryType.OTP_SMS, payload1, 0, 3);
         OutboxEntry entry2 = pendingEntry(OutboxEntryType.OTP_SMS, payload2, 0, 3);
 
-        when(repository.findByStatusAndNextAttemptAtLessThanEqual(eq(OutboxStatus.PENDING), any(Instant.class)))
+        when(repository.findByStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(eq(OutboxStatus.PENDING), any(Instant.class)))
                 .thenReturn(List.of(entry1, entry2));
         // entry1's own findById blows up with something genuinely
         // unexpected (not a delivery failure, which processEntry already
@@ -228,12 +348,14 @@ class OutboxDispatcherTest {
 
     @Test
     void dispatchPendingEntriesDoesNothingWhenNoneAreDue() {
-        when(repository.findByStatusAndNextAttemptAtLessThanEqual(eq(OutboxStatus.PENDING), any(Instant.class)))
+        when(repository.findByStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(eq(OutboxStatus.PENDING), any(Instant.class)))
                 .thenReturn(List.of());
 
         dispatcher.dispatchPendingEntries();
 
         verifyNoInteractions(smsService);
         verifyNoInteractions(mpesaService);
+        verifyNoInteractions(loanService);
+        verifyNoInteractions(customerService);
     }
 }
