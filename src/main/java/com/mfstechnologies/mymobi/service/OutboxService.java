@@ -1,11 +1,11 @@
 package com.mfstechnologies.mymobi.service;
 
-import org.springframework.transaction.annotation.Transactional;
 import com.mfstechnologies.mymobi.model.OutboxEntry;
 import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.OutboxStatus;
 import com.mfstechnologies.mymobi.session.OutboxRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
@@ -20,18 +20,22 @@ import java.util.List;
  * on its own but does NOT give the atomicity-with-a-business-write
  * guarantee that's the entire point of the pattern.
  *
- * enqueueWithBusinessWrite() is how callers actually get that guarantee.
- * IMPORTANT Spring detail: @Transactional only works through Spring's
- * proxy, which means it does NOT apply to self-invocation (a method on
- * some bean calling another method on `this` within the same class) -
- * annotating a flow service's own private submission method with
- * @Transactional would silently do nothing. Calling
- * outboxService.enqueueWithBusinessWrite(...) instead - a call to a
- * genuinely different bean - goes through the proxy correctly, so both
- * the business write and the outbox write land in one transaction.
+ * enqueueWithBusinessWrite() and enqueueAllWithBusinessWrite() are how
+ * callers actually get that guarantee. IMPORTANT Spring detail:
+ * @Transactional only works through Spring's proxy, which means it does
+ * NOT apply to self-invocation (a method on some bean calling another
+ * method on `this` within the same class) - annotating a flow service's
+ * own private submission method with @Transactional would silently do
+ * nothing. Calling these methods instead - a call to a genuinely
+ * different bean - goes through the proxy correctly, so both the
+ * business write and the outbox write(s) land in one transaction.
  */
 @Service
 public class OutboxService {
+
+    /** One entry to enqueue: used by enqueueAllWithBusinessWrite when a single business write raises several outbox entries. */
+    public record PendingEntry(OutboxEntryType type, Object payload) {
+    }
 
     private final OutboxRepository repository;
     private final ObjectMapper objectMapper;
@@ -59,7 +63,7 @@ public class OutboxService {
         entry.setCreatedAt(Instant.now());
 
         return repository.save(entry);
-    }
+            }
 
     /**
      * Runs businessWrite() and enqueues the given outbox entry, atomically
@@ -72,6 +76,21 @@ public class OutboxService {
     public OutboxEntry enqueueWithBusinessWrite(OutboxEntryType type, Object payload, Runnable businessWrite) {
         businessWrite.run();
         return enqueue(type, payload);
+    }
+
+    /**
+     * Like enqueueWithBusinessWrite, for a business write that raises
+     * more than one outbox entry (e.g. a new loan application raises
+     * both the backend request and the approval-code SMS). The business
+     * write runs first; if it throws, nothing is enqueued, and the whole
+     * transaction rolls back.
+     */
+    @Transactional
+    public List<OutboxEntry> enqueueAllWithBusinessWrite(List<PendingEntry> entries, Runnable businessWrite) {
+        businessWrite.run();
+        return entries.stream()
+                .map(pending -> enqueue(pending.type(), pending.payload()))
+                .toList();
     }
 
     /** Used by the monitoring endpoint to list entries that exhausted all retries. */
