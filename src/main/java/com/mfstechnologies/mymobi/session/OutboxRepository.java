@@ -14,18 +14,19 @@ import java.util.UUID;
  * every other repository in this codebase, which keys on a natural id),
  * so this is a JpaRepository<OutboxEntry, UUID>.
  *
- * findByStatusAndNextAttemptAtLessThanEqual is the dispatcher's main
- * query - "what's ready to attempt right now". Spring Data derives the
- * implementation from the method name; no @Query annotation needed for
- * something this simple.
+ * findByStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc is the
+ * dispatcher's main query - "what's ready to attempt right now,
+ * oldest first". The explicit ordering matters: without it the database
+ * is free to return due entries in any order, so two entries for the
+ * same person that were enqueued in a particular sequence could be
+ * dispatched in the opposite one. Spring Data derives the implementation
+ * from the method name; no @Query annotation needed.
  *
- * findByStatus is used both by the dispatcher (PENDING entries with no
- * next_attempt_at filter would be unusual, but the derived query stays
- * available for that) and by the monitoring endpoint (EXHAUSTED).
+ * findByStatus is used by the monitoring endpoint (EXHAUSTED).
  */
 public interface OutboxRepository extends JpaRepository<OutboxEntry, UUID> {
 
-    List<OutboxEntry> findByStatusAndNextAttemptAtLessThanEqual(OutboxStatus status, Instant now);
+    List<OutboxEntry> findByStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(OutboxStatus status, Instant now);
 
     List<OutboxEntry> findByStatus(OutboxStatus status);
 }
