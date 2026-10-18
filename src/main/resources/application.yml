@@ -14,6 +14,7 @@ app:
   allow-login-without-stored-data: ${ALLOW_LOGIN_WITHOUT_STORED_DATA:true}
   login-lockout-duration-seconds: ${LOGIN_LOCKOUT_DURATION_SECONDS:0}
   admin-api-key: ${ADMIN_API_KEY:}
+  mock-backend-failure-rate: ${MOCK_BACKEND_FAILURE_RATE:0.0}
 
 spring:
   datasource:
