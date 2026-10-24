@@ -33,6 +33,10 @@ import java.util.Optional;
  * RegistrationFlowService's OTP): at this point nothing has been
  * persisted yet, since the existing user's PIN isn't updated until
  * handleConfirmNewPin runs later, well after this OTP is verified.
+ *
+ * The PIN update itself IS paired with the outbox: handleConfirmNewPin
+ * saves the new PIN hash and enqueues a CUSTOMER_PIN_RESET request for
+ * the backend customer service in one transaction.
  */
 @Service
 public class ForgotPinFlowService {
@@ -147,14 +151,29 @@ public class ForgotPinFlowService {
             return;
         }
 
+        String hashedPin = passwordEncoder.encode(text);
+
         RegisteredUser user = existing.get();
-        user.setHashedPin(passwordEncoder.encode(text));
+        user.setHashedPin(hashedPin);
+
         // FIXED BUG (unrelated to WORKSTREAM G): findByPhoneNumber()
         // returns a detached entity outside any transaction - mutating
-        // it alone never persisted the new PIN. Without this save(), the
-        // "successful" reset message was sent but the person's PIN
-        // reset was silently lost; their old PIN still worked.
-        userStore.save(to, user);
+        // it alone never persisted the new PIN, so the "successful"
+        // reset message was sent but the person's old PIN still worked.
+        // The explicit save below (now inside the transactional call) is
+        // what persists it.
+        //
+        // WORKSTREAM G: that save and the backend CUSTOMER_PIN_RESET
+        // request are enqueued atomically, in one transaction - see
+        // OutboxService.enqueueWithBusinessWrite for why this goes through
+        // that method rather than a @Transactional on this one. The
+        // request carries the bcrypt hash only, never the raw PIN, and
+        // it's the same hash just stored locally.
+        outboxService.enqueueWithBusinessWrite(
+                OutboxEntryType.CUSTOMER_PIN_RESET,
+                new CustomerService.PinResetRequest(to, hashedPin),
+                () -> userStore.save(to, user)
+        );
 
         log.info("pin_reset to={}", to);
 
