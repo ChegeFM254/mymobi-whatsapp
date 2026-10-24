@@ -1,6 +1,7 @@
 package com.mfstechnologies.mymobi.service;
 
 import com.mfstechnologies.mymobi.model.Loan;
+import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
 import com.mfstechnologies.mymobi.session.LoanStore;
@@ -37,6 +38,13 @@ import java.util.Optional;
  * residual race remains for two truly simultaneous requests (check-then-
  * write isn't atomic); closing that fully would need optimistic locking
  * (@Version) on Loan, which is a possible later hardening step.
+ *
+ * WORKSTREAM G (outbox pattern): the final save (installments, paid
+ * status, cleared guard) is now paired with a LOAN_REPAYMENT_RECORD
+ * request for the backend loan service via
+ * outboxService.enqueueWithBusinessWrite, in one transaction. The two
+ * guard saves around the STK push stay plain saves - they exist only to
+ * protect against a double tap, not to be reported to the backend.
  */
 @Service
 public class LoanPaymentFlowService {
@@ -46,17 +54,20 @@ public class LoanPaymentFlowService {
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
     private final MpesaService mpesaService;
+    private final OutboxService outboxService;
     private final LoanStore loanStore;
 
     public LoanPaymentFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
             MpesaService mpesaService,
+            OutboxService outboxService,
             LoanStore loanStore
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
         this.mpesaService = mpesaService;
+        this.outboxService = outboxService;
         this.loanStore = loanStore;
     }
 
@@ -148,7 +159,21 @@ public class LoanPaymentFlowService {
         }
         // One save persists everything together: the new installment
         // count, the paid status if applicable, and the cleared guard.
-        loanStore.save(to, loan);
+        // WORKSTREAM G: it's paired with the backend LOAN_REPAYMENT_RECORD
+        // request, atomically, in one transaction - see
+        // OutboxService.enqueueWithBusinessWrite for why this goes through
+        // that method rather than a @Transactional on this one.
+        var repaymentRequest = new LoanService.RepaymentRequest(
+                to,
+                loan.getRefNo(),
+                installments,
+                payAmount
+        );
+        outboxService.enqueueWithBusinessWrite(
+                OutboxEntryType.LOAN_REPAYMENT_RECORD,
+                repaymentRequest,
+                () -> loanStore.save(to, loan)
+        );
 
         if (fullyPaid) {
             log.info("loan_fully_paid to={} refNo={}", to, loan.getRefNo());
