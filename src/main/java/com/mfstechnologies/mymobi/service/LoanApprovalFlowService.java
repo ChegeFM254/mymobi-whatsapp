@@ -1,6 +1,7 @@
 package com.mfstechnologies.mymobi.service;
 
 import com.mfstechnologies.mymobi.model.Loan;
+import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.RegisteredUser;
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
@@ -28,6 +29,13 @@ import java.util.Optional;
  * failed-attempt counters never accumulated, so the 3-attempt lockout
  * could never actually trigger. Every mutation here is now followed by an
  * explicit loanStore.save(...).
+ *
+ * WORKSTREAM G (outbox pattern): approving a loan now also raises a
+ * LOAN_APPROVAL request for the backend loan service - the point at
+ * which disbursement happens - via outboxService.enqueueWithBusinessWrite,
+ * so the approved status and the request are saved in one transaction.
+ * The request's requestId (the outbox entry id) stays the same across
+ * retries, which is what lets a real backend avoid disbursing twice.
  */
 @Service
 public class LoanApprovalFlowService {
@@ -37,17 +45,20 @@ public class LoanApprovalFlowService {
 
     private final ScreenMessageService screenService;
     private final WhatsAppMessageService messageService;
+    private final OutboxService outboxService;
     private final LoanStore loanStore;
     private final RegisteredUserStore userStore;
 
     public LoanApprovalFlowService(
             ScreenMessageService screenService,
             WhatsAppMessageService messageService,
+            OutboxService outboxService,
             LoanStore loanStore,
             RegisteredUserStore userStore
     ) {
         this.screenService = screenService;
         this.messageService = messageService;
+        this.outboxService = outboxService;
         this.loanStore = loanStore;
         this.userStore = userStore;
     }
@@ -116,7 +127,22 @@ public class LoanApprovalFlowService {
 
         loan.setStatus("approved");
         loan.setApprovedAt(Instant.now());
-        loanStore.save(to, loan);
+
+        // WORKSTREAM G: saving the approval and enqueueing the backend
+        // LOAN_APPROVAL request (the point at which disbursement happens)
+        // are one atomic transaction - see
+        // OutboxService.enqueueWithBusinessWrite for why this goes through
+        // that method rather than a @Transactional on this one.
+        var approvalRequest = new LoanService.ApprovalRequest(
+                to,
+                loan.getRefNo(),
+                loan.getBreakdown().disbursement()
+        );
+        outboxService.enqueueWithBusinessWrite(
+                OutboxEntryType.LOAN_APPROVAL,
+                approvalRequest,
+                () -> loanStore.save(to, loan)
+        );
         session.setStep("welcome");
 
         log.info("loan_approved to={} refNo={}", to, loan.getRefNo());
