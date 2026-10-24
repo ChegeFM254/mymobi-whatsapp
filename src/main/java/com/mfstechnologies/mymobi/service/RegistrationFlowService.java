@@ -62,6 +62,14 @@ import java.util.Map;
  * with here - at this point in the flow nothing has been persisted yet;
  * the RegisteredUser isn't created until completeRegistration() runs,
  * well after the person has verified this OTP and set their PIN.
+ *
+ * The account creation itself IS paired with the outbox:
+ * completeRegistration saves the RegisteredUser and enqueues a
+ * CUSTOMER_CREATE request for the backend customer service in one
+ * transaction, via outboxService.enqueueWithBusinessWrite(...). The
+ * bcrypt PIN hash is computed once and used for both, so the local
+ * record and the request always carry the same hash - the raw PIN is
+ * never put in the outbox.
  */
 @Service
 public class RegistrationFlowService {
@@ -332,6 +340,8 @@ public class RegistrationFlowService {
     }
 
     private void completeRegistration(String to, UserSession session) {
+        String hashedPin = passwordEncoder.encode(session.getNewPin());
+
         RegisteredUser user = new RegisteredUser();
         user.setFirstName(session.getFirstName());
         user.setMiddleName(session.getMiddleName());
@@ -340,9 +350,29 @@ public class RegistrationFlowService {
         user.setUpn(session.getUpn());
         user.setNationalId(session.getNationalId());
         user.setMobileNumber(session.getMobileNumber());
-        user.setHashedPin(passwordEncoder.encode(session.getNewPin()));
+        user.setHashedPin(hashedPin);
         user.setStatus("active");
-        userStore.save(to, user);
+
+        // WORKSTREAM G: saving the account and enqueueing its backend
+        // CUSTOMER_CREATE request happen atomically, in one transaction -
+        // see OutboxService.enqueueWithBusinessWrite for why this goes
+        // through that method rather than a @Transactional on this one.
+        var request = new CustomerService.CreateRequest(
+                to,
+                session.getFirstName(),
+                session.getMiddleName(),
+                session.getLastName(),
+                session.getEmailAddress(),
+                session.getUpn(),
+                session.getNationalId(),
+                session.getMobileNumber(),
+                hashedPin
+        );
+        outboxService.enqueueWithBusinessWrite(
+                OutboxEntryType.CUSTOMER_CREATE,
+                request,
+                () -> userStore.save(to, user)
+        );
 
         log.info("user_registered to={} firstName={} lastName={}", to, session.getFirstName(), session.getLastName());
 
