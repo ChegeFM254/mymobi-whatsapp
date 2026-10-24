@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -38,12 +39,14 @@ import java.util.concurrent.TimeUnit;
  *
  * WORKSTREAM G (outbox pattern): the direct smsService.sendSms(...) call
  * for the Approval Code is gone - submitLoanApplication now calls
- * outboxService.enqueueWithBusinessWrite(...) instead, which saves the
- * Loan AND writes the APPROVAL_CODE_SMS outbox entry atomically, in one
- * database transaction. This means a crash between "loan saved" and
- * "SMS sent" can no longer lose the approval code silently - either both
- * happen, or (if the app crashes before the transaction commits) neither
- * does, and the person can safely resubmit. scheduleApproveLoanScreenAfterDelay
+ * outboxService.enqueueAllWithBusinessWrite(...) instead, which saves the
+ * Loan AND writes two outbox entries atomically, in one database
+ * transaction: the backend LOAN_APPLICATION_SUBMIT request and the
+ * APPROVAL_CODE_SMS notification. This means a crash between "loan saved"
+ * and "SMS sent" can no longer lose the approval code silently - either
+ * all of it happens, or (if the app crashes before the transaction
+ * commits) none of it does, and the person can safely resubmit.
+ * scheduleApproveLoanScreenAfterDelay
  * deliberately stays on its own CompletableFuture - losing that screen's
  * auto-popup is a minor inconvenience (the person can reach Approve Loan
  * manually from Main Menu), not a durability-critical failure, so it
@@ -209,15 +212,26 @@ public class LoanApplicationFlowService {
         loan.setInstallmentsPaid(0);
         loan.setSubmittedAt(Instant.now());
 
-        // WORKSTREAM G: saving the loan and enqueueing its Approval Code
-        // SMS happen atomically, in one transaction - see
-        // OutboxService.enqueueWithBusinessWrite for why a plain
+        // WORKSTREAM G: saving the loan and enqueueing both its backend
+        // LOAN_APPLICATION_SUBMIT request and its Approval Code SMS happen
+        // atomically, in one transaction - see
+        // OutboxService.enqueueAllWithBusinessWrite for why a plain
         // @Transactional on this method wouldn't actually work here
         // (self-invocation bypasses Spring's transaction proxy).
-        var payload = new OutboxPayloads.ApprovalCodeSmsPayload(to, "Approval Code " + approvalCode, refNo);
-        outboxService.enqueueWithBusinessWrite(
-                OutboxEntryType.APPROVAL_CODE_SMS,
-                payload,
+        var applicationRequest = new LoanService.ApplicationRequest(
+                to,
+                refNo,
+                session.getLoanAmount(),
+                session.getLoanTenureMonths(),
+                payrollNumber,
+                dueDate
+        );
+        var approvalCodeSms = new OutboxPayloads.ApprovalCodeSmsPayload(to, "Approval Code " + approvalCode, refNo);
+        outboxService.enqueueAllWithBusinessWrite(
+                List.of(
+                        new OutboxService.PendingEntry(OutboxEntryType.LOAN_APPLICATION_SUBMIT, applicationRequest),
+                        new OutboxService.PendingEntry(OutboxEntryType.APPROVAL_CODE_SMS, approvalCodeSms)
+                ),
                 () -> loanStore.save(to, loan)
         );
 
