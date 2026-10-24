@@ -2,6 +2,8 @@ package com.mfstechnologies.mymobi.service;
 
 import com.mfstechnologies.mymobi.model.Loan;
 import com.mfstechnologies.mymobi.model.LoanBreakdown;
+import com.mfstechnologies.mymobi.model.OutboxEntry;
+import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
 import com.mfstechnologies.mymobi.session.LoanRepository;
@@ -45,6 +47,14 @@ import static org.mockito.Mockito.*;
  * loanRepository.save(...), after clearInvocations(...) wipes the
  * setup's own save() from the history (otherwise that earlier call alone
  * would satisfy the verification).
+ *
+ * WORKSTREAM G (outbox pattern): OutboxService is mocked here, with
+ * enqueueWithBusinessWrite stubbed to actually run the given business
+ * write (the final loan save) as the real one does inside its
+ * transaction - otherwise the mock would silently swallow the Runnable
+ * and the payment would never be saved. The two guard saves around the
+ * STK push are plain saves, so a successful payment is still two
+ * save() calls in total: one direct, one inside the outbox call.
  */
 @ExtendWith(MockitoExtension.class)
 class LoanPaymentFlowServiceTest {
@@ -58,6 +68,8 @@ class LoanPaymentFlowServiceTest {
     @Mock
     private MpesaService mpesaService;
     @Mock
+    private OutboxService outboxService;
+    @Mock
     private LoanRepository loanRepository;
 
     private LoanStore loanStore;
@@ -66,9 +78,19 @@ class LoanPaymentFlowServiceTest {
     void setUp() {
         FakeRepositories.wireAsInMemoryStore(loanRepository, Loan::getPhoneNumber);
         loanStore = new LoanStore(loanRepository);
-        paymentFlow = new LoanPaymentFlowService(screenService, messageService, mpesaService, loanStore);
-    }
+        paymentFlow = new LoanPaymentFlowService(screenService, messageService, mpesaService, outboxService, loanStore);
 
+        // enqueueWithBusinessWrite runs the given business write (here,
+        // the final loan save) just as the real one does inside its
+        // transaction - without this the mock would silently swallow the
+        // Runnable and the payment would never actually be saved.
+        lenient().when(outboxService.enqueueWithBusinessWrite(any(), any(), any())).thenAnswer(invocation -> {
+            Runnable businessWrite = invocation.getArgument(2);
+            businessWrite.run();
+            return new OutboxEntry();
+        });
+    }
+    
     private Loan approvedLoan(int tenureMonths, int installmentsPaid) {
         Loan loan = new Loan();
         loan.setTenureMonths(tenureMonths);
@@ -256,6 +278,84 @@ class LoanPaymentFlowServiceTest {
 
         paymentFlow.handleCancelPayLoan(FROM, session);
 
-        assertThat(session.getPendingPaymentInstallments()).isNull();
+                assertThat(session.getPendingPaymentInstallments()).isNull();
+    }
+
+    // ==================== LOAN_REPAYMENT_RECORD (WORKSTREAM G) ====================
+
+    @Test
+    void confirmingAPaymentRaisesARepaymentRequestCarryingTheInstallmentsAndAmount() {
+        loanStore.save(FROM, approvedLoan(3, 0));
+        UserSession session = new UserSession();
+        session.setPendingPaymentInstallments(2);
+
+        paymentFlow.handleConfirmPayLoan(FROM, session);
+
+        verify(outboxService).enqueueWithBusinessWrite(
+                eq(OutboxEntryType.LOAN_REPAYMENT_RECORD),
+                eq(new LoanService.RepaymentRequest(FROM, "MVCAGHD1", 2, 28884)),
+                any()
+        );
+    }
+
+    @Test
+    void theFinalPaymentRaisesARepaymentRequestToo() {
+        loanStore.save(FROM, approvedLoan(3, 2)); // 1 remaining
+        UserSession session = new UserSession();
+        session.setPendingPaymentInstallments(1);
+
+        paymentFlow.handleConfirmPayLoan(FROM, session);
+
+        verify(outboxService).enqueueWithBusinessWrite(
+                eq(OutboxEntryType.LOAN_REPAYMENT_RECORD),
+                eq(new LoanService.RepaymentRequest(FROM, "MVCAGHD1", 1, 14442)),
+                any()
+        );
+    }
+
+    @Test
+    void theFinalStateIsOnlySavedInsideTheOutboxCallNeverSeparately() {
+        // Replaces the setUp stub with one that does NOT run the business
+        // write. The only direct save left is the in-progress guard
+        // before the STK push, so the repository must see exactly one
+        // save() here. If the final state were also saved directly,
+        // outside enqueueWithBusinessWrite, there would be two - which
+        // would break the atomicity with the LOAN_REPAYMENT_RECORD request.
+        doReturn(new OutboxEntry()).when(outboxService).enqueueWithBusinessWrite(any(), any(), any());
+        Loan loan = approvedLoan(3, 0);
+        loanStore.save(FROM, loan);
+        clearInvocations(loanRepository);
+        UserSession session = new UserSession();
+        session.setPendingPaymentInstallments(1);
+
+        paymentFlow.handleConfirmPayLoan(FROM, session);
+
+        verify(loanRepository, times(1)).save(loan);
+    }
+
+    @Test
+    void aFailedStkPushRaisesNoRepaymentRequest() {
+        loanStore.save(FROM, approvedLoan(3, 0));
+        UserSession session = new UserSession();
+        session.setPendingPaymentInstallments(1);
+        doThrow(new RuntimeException("stk failed")).when(mpesaService).initiateStkPush(anyString(), anyDouble(), anyString());
+
+        assertThatThrownBy(() -> paymentFlow.handleConfirmPayLoan(FROM, session))
+                .hasMessage("stk failed");
+
+        verifyNoInteractions(outboxService);
+    }
+
+    @Test
+    void aBlockedDoubleTapRaisesNoRepaymentRequest() {
+        Loan loan = approvedLoan(3, 0);
+        loan.setPaymentInProgress(true);
+        loanStore.save(FROM, loan);
+        UserSession session = new UserSession();
+        session.setPendingPaymentInstallments(1);
+
+        paymentFlow.handleConfirmPayLoan(FROM, session);
+
+        verifyNoInteractions(outboxService);
     }
 }
