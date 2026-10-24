@@ -11,6 +11,7 @@ import com.mfstechnologies.mymobi.testsupport.FakeRepositories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -83,6 +84,16 @@ class ForgotPinFlowServiceTest {
         forgotPinFlowService = new ForgotPinFlowService(screenService, messageService, outboxService, userStore, passwordEncoder, lockoutService);
 
         lenient().when(outboxService.enqueue(any(), any())).thenReturn(new OutboxEntry());
+
+        // enqueueWithBusinessWrite runs the given business write (here,
+        // the local PIN save) just as the real one does inside its
+        // transaction - without this the mock would silently swallow the
+        // Runnable and the new PIN would never actually be saved.
+        lenient().when(outboxService.enqueueWithBusinessWrite(any(), any(), any())).thenAnswer(invocation -> {
+            Runnable businessWrite = invocation.getArgument(2);
+            businessWrite.run();
+            return new OutboxEntry();
+        });
     }
 
     @Test
@@ -214,6 +225,87 @@ class ForgotPinFlowServiceTest {
         assertThat(session.getStep()).isEqualTo("forgot_pin_enter_new_pin");
         // WORKSTREAM E: the Flow must be re-sent so the retry also
         // happens securely, not by falling back to typing in chat.
-        verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
+                verify(screenService).sendCodeEntryFlow(eq(FROM), anyString(), anyString());
+    }
+
+    // ==================== CUSTOMER_PIN_RESET (WORKSTREAM G) ====================
+
+    @Test
+    void confirmingTheNewPinRaisesAPinResetRequestCarryingTheSameHashAsTheLocalAccount() {
+        RegisteredUser existing = new RegisteredUser();
+        existing.setHashedPin(passwordEncoder.encode("11111"));
+        userStore.save(FROM, existing);
+        UserSession session = new UserSession();
+        session.setNewPin("99999");
+
+        forgotPinFlowService.handleConfirmNewPin(FROM, "99999", session);
+
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(outboxService).enqueueWithBusinessWrite(eq(OutboxEntryType.CUSTOMER_PIN_RESET), payloadCaptor.capture(), any());
+        CustomerService.PinResetRequest request = (CustomerService.PinResetRequest) payloadCaptor.getValue();
+        assertThat(request.phoneNumber()).isEqualTo(FROM);
+        // The hash is computed once, so the request and the locally
+        // stored account carry exactly the same value.
+        assertThat(request.hashedPin()).isEqualTo(userStore.findByPhoneNumber(FROM).get().getHashedPin());
+    }
+
+    @Test
+    void thePinResetRequestCarriesTheHashNeverTheRawPin() {
+        RegisteredUser existing = new RegisteredUser();
+        existing.setHashedPin(passwordEncoder.encode("11111"));
+        userStore.save(FROM, existing);
+        UserSession session = new UserSession();
+        session.setNewPin("99999");
+
+        forgotPinFlowService.handleConfirmNewPin(FROM, "99999", session);
+
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(outboxService).enqueueWithBusinessWrite(eq(OutboxEntryType.CUSTOMER_PIN_RESET), payloadCaptor.capture(), any());
+        CustomerService.PinResetRequest request = (CustomerService.PinResetRequest) payloadCaptor.getValue();
+        assertThat(request.hashedPin()).isNotEqualTo("99999");
+        assertThat(passwordEncoder.matches("99999", request.hashedPin())).isTrue();
+    }
+
+    @Test
+    void thePinIsOnlySavedInsideTheOutboxCallNeverSeparately() {
+        // Replaces the setUp stub with one that does NOT run the business
+        // write. If handleConfirmNewPin also saved the user directly,
+        // outside enqueueWithBusinessWrite, the repository would see a
+        // save() here - which would break the atomicity with the
+        // CUSTOMER_PIN_RESET request. (The in-memory fake shares object
+        // references, so checking the stored PIN's value couldn't tell
+        // us this; checking for the save() call itself can.)
+        doReturn(new OutboxEntry()).when(outboxService).enqueueWithBusinessWrite(any(), any(), any());
+        RegisteredUser existing = new RegisteredUser();
+        existing.setHashedPin(passwordEncoder.encode("11111"));
+        userStore.save(FROM, existing);
+        clearInvocations(registeredUserRepository);
+        UserSession session = new UserSession();
+        session.setNewPin("99999");
+
+        forgotPinFlowService.handleConfirmNewPin(FROM, "99999", session);
+
+        verify(registeredUserRepository, never()).save(any());
+    }
+
+    @Test
+    void noPinResetRequestIsRaisedWhenThePinsDoNotMatch() {
+        UserSession session = new UserSession();
+        session.setNewPin("99999");
+
+        forgotPinFlowService.handleConfirmNewPin(FROM, "11111", session);
+
+        verify(outboxService, never()).enqueueWithBusinessWrite(any(), any(), any());
+    }
+
+    @Test
+    void noPinResetRequestIsRaisedWhenNoAccountExists() {
+        UserSession session = new UserSession();
+        session.setNewPin("99999");
+
+        forgotPinFlowService.handleConfirmNewPin(FROM, "99999", session);
+
+        verify(outboxService, never()).enqueueWithBusinessWrite(any(), any(), any());
+        verify(screenService).sendWelcome(FROM);
     }
 }
