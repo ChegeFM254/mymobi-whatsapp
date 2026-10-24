@@ -11,6 +11,7 @@ import com.mfstechnologies.mymobi.testsupport.FakeRepositories;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -69,6 +70,16 @@ class RegistrationFlowServiceTest {
         registrationFlowService = new RegistrationFlowService(screenService, messageService, outboxService, userStore, passwordEncoder);
 
         lenient().when(outboxService.enqueue(any(), any())).thenReturn(new OutboxEntry());
+
+        // enqueueWithBusinessWrite runs the given business write (here,
+        // the local account save) just as the real one does inside its
+        // transaction - without this the mock would silently swallow the
+        // Runnable and the account would never actually be saved.
+        lenient().when(outboxService.enqueueWithBusinessWrite(any(), any(), any())).thenAnswer(invocation -> {
+            Runnable businessWrite = invocation.getArgument(2);
+            businessWrite.run();
+            return new OutboxEntry();
+        });
     }
 
     // ==================== ENTRY + OPT-IN ====================
@@ -437,6 +448,67 @@ class RegistrationFlowServiceTest {
 
         String storedHash = userStore.findByPhoneNumber(FROM).get().getHashedPin();
         assertThat(storedHash).isNotEqualTo("99999");
-        assertThat(storedHash.length()).isGreaterThan(20); // BCrypt hashes are always much longer than a 5-digit PIN
+                assertThat(storedHash.length()).isGreaterThan(20); // BCrypt hashes are always much longer than a 5-digit PIN
+    }
+
+    // ==================== CUSTOMER_CREATE (WORKSTREAM G) ====================
+
+    @Test
+    void completingRegistrationRaisesACustomerCreateRequestCarryingTheSameHashAsTheLocalAccount() {
+        UserSession session = new UserSession();
+        session.setFirstName("Jane");
+        session.setMiddleName("Wanjiru");
+        session.setLastName("Doe");
+        session.setEmailAddress("jane.doe@example.com");
+        session.setUpn("12345");
+        session.setNationalId("87654321");
+        session.setMobileNumber("0722730336");
+        session.setNewPin("99999");
+
+        registrationFlowService.handleConfirmNewPin(FROM, "99999", session);
+
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(outboxService).enqueueWithBusinessWrite(eq(OutboxEntryType.CUSTOMER_CREATE), payloadCaptor.capture(), any());
+        CustomerService.CreateRequest request = (CustomerService.CreateRequest) payloadCaptor.getValue();
+        assertThat(request.phoneNumber()).isEqualTo(FROM);
+        assertThat(request.firstName()).isEqualTo("Jane");
+        assertThat(request.middleName()).isEqualTo("Wanjiru");
+        assertThat(request.lastName()).isEqualTo("Doe");
+        assertThat(request.emailAddress()).isEqualTo("jane.doe@example.com");
+        assertThat(request.upn()).isEqualTo("12345");
+        assertThat(request.nationalId()).isEqualTo("87654321");
+        assertThat(request.mobileNumber()).isEqualTo("0722730336");
+        // The hash is computed once, so the request and the locally
+        // stored account carry exactly the same value.
+        assertThat(request.hashedPin()).isEqualTo(userStore.findByPhoneNumber(FROM).get().getHashedPin());
+    }
+
+    @Test
+    void theCustomerCreateRequestCarriesTheHashNeverTheRawPin() {
+        UserSession session = new UserSession();
+        session.setNewPin("99999");
+
+        registrationFlowService.handleConfirmNewPin(FROM, "99999", session);
+
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(outboxService).enqueueWithBusinessWrite(eq(OutboxEntryType.CUSTOMER_CREATE), payloadCaptor.capture(), any());
+        CustomerService.CreateRequest request = (CustomerService.CreateRequest) payloadCaptor.getValue();
+        assertThat(request.hashedPin()).isNotEqualTo("99999");
+        assertThat(new BCryptPasswordEncoder().matches("99999", request.hashedPin())).isTrue();
+    }
+
+    @Test
+    void theAccountIsOnlySavedInsideTheOutboxCallNeverSeparately() {
+        // Replaces the setUp stub with one that does NOT run the business
+        // write. If completeRegistration also saved the account directly,
+        // outside enqueueWithBusinessWrite, it would exist here - which
+        // would break the atomicity with the CUSTOMER_CREATE request.
+        doReturn(new OutboxEntry()).when(outboxService).enqueueWithBusinessWrite(any(), any(), any());
+        UserSession session = new UserSession();
+        session.setNewPin("99999");
+
+        registrationFlowService.handleConfirmNewPin(FROM, "99999", session);
+
+        assertThat(userStore.findByPhoneNumber(FROM)).isEmpty();
     }
 }
