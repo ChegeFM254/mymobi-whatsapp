@@ -2,6 +2,8 @@ package com.mfstechnologies.mymobi.service;
 
 import com.mfstechnologies.mymobi.model.LoanBreakdown;
 import com.mfstechnologies.mymobi.model.Loan;
+import com.mfstechnologies.mymobi.model.OutboxEntry;
+import com.mfstechnologies.mymobi.model.OutboxEntryType;
 import com.mfstechnologies.mymobi.model.RegisteredUser;
 import com.mfstechnologies.mymobi.model.UserSession;
 import com.mfstechnologies.mymobi.screen.ScreenMessageService;
@@ -41,6 +43,12 @@ import static org.mockito.Mockito.*;
  * verifies loanRepository.save(...) was genuinely called, after
  * clearInvocations(...) wipes the setup's own save() from the history
  * (otherwise that earlier call alone would satisfy the verification).
+ *
+ * WORKSTREAM G (outbox pattern): OutboxService is mocked here, with
+ * enqueueWithBusinessWrite stubbed to actually run the given business
+ * write (the loan save) as the real one does inside its transaction -
+ * otherwise the mock would silently swallow the Runnable and the
+ * approval would never be saved.
  */
 @ExtendWith(MockitoExtension.class)
 class LoanApprovalFlowServiceTest {
@@ -51,6 +59,8 @@ class LoanApprovalFlowServiceTest {
     private ScreenMessageService screenService;
     @Mock
     private WhatsAppMessageService messageService;
+    @Mock
+    private OutboxService outboxService;
     @Mock
     private RegisteredUserRepository registeredUserRepository;
     @Mock
@@ -63,10 +73,20 @@ class LoanApprovalFlowServiceTest {
     @BeforeEach
     void setUp() {
         FakeRepositories.wireAsInMemoryStore(loanRepository, Loan::getPhoneNumber);
-                loanStore = new LoanStore(loanRepository);
+        loanStore = new LoanStore(loanRepository);
         FakeRepositories.wireAsInMemoryStore(registeredUserRepository, RegisteredUser::getPhoneNumber);
         userStore = new RegisteredUserStore(registeredUserRepository);
-        approvalFlow = new LoanApprovalFlowService(screenService, messageService, loanStore, userStore);
+        approvalFlow = new LoanApprovalFlowService(screenService, messageService, outboxService, loanStore, userStore);
+
+        // enqueueWithBusinessWrite runs the given business write (here,
+        // the loan save) just as the real one does inside its
+        // transaction - without this the mock would silently swallow the
+        // Runnable and the approval would never actually be saved.
+        lenient().when(outboxService.enqueueWithBusinessWrite(any(), any(), any())).thenAnswer(invocation -> {
+            Runnable businessWrite = invocation.getArgument(2);
+            businessWrite.run();
+            return new OutboxEntry();
+        });
     }
 
     private Loan pendingLoan() {
@@ -231,6 +251,80 @@ class LoanApprovalFlowServiceTest {
         approvalFlow.handleCancelLoanNo(FROM, session);
 
         assertThat(loanStore.findByPhoneNumber(FROM)).isPresent();
-        verify(screenService).sendMainMenu(FROM);
+                verify(screenService).sendMainMenu(FROM);
+    }
+
+    // ==================== LOAN_APPROVAL (WORKSTREAM G) ====================
+
+    @Test
+    void approvingALoanRaisesALoanApprovalRequestCarryingTheDisbursementAmount() {
+        loanStore.save(FROM, pendingLoan());
+        RegisteredUser user = new RegisteredUser();
+        user.setUpn("19999999");
+        userStore.save(FROM, user);
+        UserSession session = new UserSession();
+
+        approvalFlow.handleApprovalPayrollNumber(FROM, "19999999", session);
+
+        // pendingLoan() uses a breakdown whose disbursement is 32057.
+        verify(outboxService).enqueueWithBusinessWrite(
+                eq(OutboxEntryType.LOAN_APPROVAL),
+                eq(new LoanService.ApprovalRequest(FROM, "REF12345", 32057)),
+                any()
+        );
+    }
+
+    @Test
+    void theApprovalIsOnlySavedInsideTheOutboxCallNeverSeparately() {
+        // Replaces the setUp stub with one that does NOT run the business
+        // write. If handleApprovalPayrollNumber also saved the loan
+        // directly, outside enqueueWithBusinessWrite, the repository would
+        // see a save() here - which would break the atomicity with the
+        // LOAN_APPROVAL request. (The in-memory fake shares object
+        // references, so checking the loan's status couldn't tell us
+        // this; checking for the save() call itself can.)
+        doReturn(new OutboxEntry()).when(outboxService).enqueueWithBusinessWrite(any(), any(), any());
+        loanStore.save(FROM, pendingLoan());
+        RegisteredUser user = new RegisteredUser();
+        user.setUpn("19999999");
+        userStore.save(FROM, user);
+        clearInvocations(loanRepository);
+        UserSession session = new UserSession();
+
+        approvalFlow.handleApprovalPayrollNumber(FROM, "19999999", session);
+
+        verify(loanRepository, never()).save(any());
+    }
+
+    @Test
+    void aWrongPayrollNumberRaisesNoApprovalRequest() {
+        loanStore.save(FROM, pendingLoan());
+        RegisteredUser user = new RegisteredUser();
+        user.setUpn("19999999");
+        userStore.save(FROM, user);
+        UserSession session = new UserSession();
+
+        approvalFlow.handleApprovalPayrollNumber(FROM, "10000000", session);
+
+        verifyNoInteractions(outboxService);
+    }
+
+    @Test
+    void aWrongApprovalCodeRaisesNoApprovalRequest() {
+        loanStore.save(FROM, pendingLoan());
+        UserSession session = new UserSession();
+
+        approvalFlow.handleEnterApprovalCode(FROM, "000000", session);
+
+        verifyNoInteractions(outboxService);
+    }
+
+    @Test
+    void anApprovalAttemptWithNoPendingLoanRaisesNoApprovalRequest() {
+        UserSession session = new UserSession();
+
+        approvalFlow.handleApprovalPayrollNumber(FROM, "19999999", session);
+
+        verifyNoInteractions(outboxService);
     }
 }
