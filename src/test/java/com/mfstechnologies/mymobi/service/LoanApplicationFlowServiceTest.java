@@ -17,6 +17,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -32,13 +34,15 @@ import static org.mockito.Mockito.*;
  * working collaborators, exactly as they did with the old
  * ConcurrentHashMap.
  *
- * WORKSTREAM G (outbox pattern): Approval Code delivery now goes through
- * outboxService.enqueueWithBusinessWrite(...) instead of a direct
- * SmsService call. OutboxService itself is mocked here (not wired via
+ * WORKSTREAM G (outbox pattern): submitting a loan now raises two outbox
+ * entries - the backend LOAN_APPLICATION_SUBMIT request and the
+ * APPROVAL_CODE_SMS notification - via a single
+ * outboxService.enqueueAllWithBusinessWrite(...) call, atomically with
+ * the loan save. OutboxService itself is mocked here (not wired via
  * FakeRepositories like LoanStore/RegisteredUserStore) since OutboxEntry
  * has an auto-generated id that FakeRepositories' generic in-memory
  * wiring doesn't model - OutboxService gets its own dedicated test for
- * that. The mock's enqueueWithBusinessWrite is stubbed to actually
+ * that. The mock's enqueueAllWithBusinessWrite is stubbed to actually
  * invoke the given Runnable, since that's what runs the real
  * loanStore.save(...) call this flow depends on - without that stub,
  * the mock would silently swallow the runnable and the loan would never
@@ -74,10 +78,10 @@ class LoanApplicationFlowServiceTest {
         calculationService = new MockLoanCalculationService();
         loanFlow = new LoanApplicationFlowService(screenService, messageService, outboxService, loanStore, userStore, calculationService);
 
-        lenient().when(outboxService.enqueueWithBusinessWrite(any(), any(), any())).thenAnswer(invocation -> {
-            Runnable businessWrite = invocation.getArgument(2);
+        lenient().when(outboxService.enqueueAllWithBusinessWrite(any(), any())).thenAnswer(invocation -> {
+            Runnable businessWrite = invocation.getArgument(1);
             businessWrite.run();
-            return new OutboxEntry();
+            return List.of();
         });
     }
 
@@ -245,11 +249,21 @@ class LoanApplicationFlowServiceTest {
         assertThat(submitted.getApprovalCode()).matches("^\\d{6}$");
         assertThat(session.getLoanAmount()).isNull(); // session fields cleared after submission
 
-        // WORKSTREAM G: Approval Code delivery now goes through the
-        // outbox, atomically with the loan save.
-        verify(outboxService).enqueueWithBusinessWrite(
-                eq(OutboxEntryType.APPROVAL_CODE_SMS),
-                argThat(payload -> payload instanceof OutboxPayloads.ApprovalCodeSmsPayload p
+        // WORKSTREAM G: both the backend application request and the
+        // Approval Code SMS go through the outbox, atomically with the
+        // loan save, in that order.
+        verify(outboxService).enqueueAllWithBusinessWrite(
+                argThat(entries -> entries.size() == 2
+                        && entries.get(0).type() == OutboxEntryType.LOAN_APPLICATION_SUBMIT
+                        && entries.get(0).payload() instanceof LoanService.ApplicationRequest r
+                        && r.phoneNumber().equals(FROM)
+                        && r.refNo().equals(submitted.getRefNo())
+                        && r.loanAmount() == 15000
+                        && r.tenureMonths() == 1
+                        && r.payrollNumber().equals("19999999")
+                        && r.dueDate().equals(submitted.getDueDate())
+                        && entries.get(1).type() == OutboxEntryType.APPROVAL_CODE_SMS
+                        && entries.get(1).payload() instanceof OutboxPayloads.ApprovalCodeSmsPayload p
                         && p.phoneNumber().equals(FROM)
                         && p.message().contains(submitted.getApprovalCode())
                         && p.refNo().equals(submitted.getRefNo())),
@@ -298,5 +312,56 @@ class LoanApplicationFlowServiceTest {
         loanFlow.handleBack(FROM, session);
 
         verify(screenService).sendHomeScreen(FROM, session);
+    }
+
+    // ==================== OUTBOX PAIRING (WORKSTREAM G) ====================
+
+    @Test
+    void submittingALoanRaisesBothOutboxEntriesInOneAtomicCallAndNothingSeparately() {
+        RegisteredUser user = new RegisteredUser();
+        user.setUpn("19999999");
+        userStore.save(FROM, user);
+        UserSession session = new UserSession();
+        session.setLoanAmount(15000);
+        session.setLoanTenureMonths(1);
+
+        loanFlow.handleEnterPayrollNumber(FROM, "19999999", session);
+
+        verify(outboxService, times(1)).enqueueAllWithBusinessWrite(any(), any());
+        verify(outboxService, never()).enqueueWithBusinessWrite(any(), any(), any());
+        verify(outboxService, never()).enqueue(any(), any());
+    }
+
+    @Test
+    void theLoanIsOnlySavedInsideTheOutboxCallNeverSeparately() {
+        // Replaces the setUp stub with one that does NOT run the business
+        // write. If submitLoanApplication also saved the loan directly,
+        // outside enqueueAllWithBusinessWrite, it would exist here -
+        // which would break the atomicity with the two outbox entries.
+        doReturn(List.of()).when(outboxService).enqueueAllWithBusinessWrite(any(), any());
+        RegisteredUser user = new RegisteredUser();
+        user.setUpn("19999999");
+        userStore.save(FROM, user);
+        UserSession session = new UserSession();
+        session.setLoanAmount(15000);
+        session.setLoanTenureMonths(1);
+
+        loanFlow.handleEnterPayrollNumber(FROM, "19999999", session);
+
+        assertThat(loanStore.findByPhoneNumber(FROM)).isEmpty();
+    }
+
+    @Test
+    void aWrongPayrollNumberRaisesNoOutboxEntries() {
+        RegisteredUser user = new RegisteredUser();
+        user.setUpn("19999999");
+        userStore.save(FROM, user);
+        UserSession session = new UserSession();
+        session.setLoanAmount(15000);
+        session.setLoanTenureMonths(1);
+
+        loanFlow.handleEnterPayrollNumber(FROM, "10000000", session); // wrong UPN
+
+        verifyNoInteractions(outboxService);
     }
 }
